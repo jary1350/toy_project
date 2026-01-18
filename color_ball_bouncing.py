@@ -1,17 +1,23 @@
 import pygame
 import pymunk
 import random
+import math
 
 # --- Configuration ---
 WIDTH, HEIGHT = 1000, 800  # Increased width for the UI panel
 GAME_WIDTH = 800
 FPS = 60
-GRAVITY = 900.0
+GRAVITY = 100.0
 MARBLE_RADIUS = 10
 PIN_RADIUS = 5
+MONSTER_RADIUS = 20  # 2x marble radius
+MONSTER_SPEED = 200  # pixels per second
+MONSTER_Y = 400  # Center height
 
 # Colors
 WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+DARK_GRAY = (40, 40, 40)
 BG_COLOR = (100, 149, 237)
 FIRE_COLOR = (255, 69, 0)
 SAFE_COLOR = (50, 205, 50)
@@ -24,18 +30,32 @@ class MarbleSurvival:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Arial", 18)
+        self.big_font = pygame.font.SysFont("Arial", 24, bold=True)
 
         self.space = pymunk.Space()
         self.space.gravity = (0, GRAVITY)
 
+        # Collision handler: monster eats marbles (type 1: marbles, type 2: monster)
+        def marble_monster_collision(arbiter, space, data):
+            shapes = arbiter.shapes
+            for shape in shapes:
+                if hasattr(shape, 'custom_color'):  # Marble
+                    space.remove(shape.body, shape)
+                    break
+            arbiter.process_collision = False
+            return
+
+        self.space.on_collision(collision_type_a=1, collision_type_b=2, begin=marble_monster_collision)
+
         self.marbles = []
         self.survivors = []
         self.pins = []
-        self.current_colors = [(random.randint(50, 255), random.randint(50, 255), random.randint(50, 255)) for _ in
-                               range(1_000)]
+        self.current_colors = [(random.randint(50, 255), random.randint(50, 255), random.randint(50, 255)) for _ in range(1_00)]
+        self.round_count = 1
 
         self.create_boundaries()
         self.create_pins()
+        self.create_monster()
         self.start_level()
 
     def create_boundaries(self):
@@ -60,21 +80,49 @@ class MarbleSurvival:
                 self.space.add(shape)
                 self.pins.append(shape)
 
+    def create_monster(self):
+        # Kinematic body for smooth patrol movement
+        self.monster_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        self.monster_body.position = (GAME_WIDTH // 4, MONSTER_Y)  # Start leftish
+        self.monster_shape = pymunk.Circle(self.monster_body, MONSTER_RADIUS)
+        self.monster_shape.collision_type = 2
+        self.monster_shape.elasticity = 0.9
+        self.monster_shape.friction = 0.5
+        self.space.add(self.monster_body, self.monster_shape)
+
+        self.monster_dir = 1  # 1: right, -1: left
+        self.monster_left_bound = MONSTER_RADIUS + 20
+        self.monster_right_bound = GAME_WIDTH - MONSTER_RADIUS - 20
+
+    def update_monster(self, dt):
+        self.monster_body.velocity = (MONSTER_SPEED * self.monster_dir, 0)
+        pos_x = self.monster_body.position.x
+        if pos_x <= self.monster_left_bound:
+            self.monster_dir = 1
+            self.monster_body.position = (self.monster_left_bound, MONSTER_Y)
+        elif pos_x >= self.monster_right_bound:
+            self.monster_dir = -1
+            self.monster_body.position = (self.monster_right_bound, MONSTER_Y)
+
     def start_level(self):
         """Resets the game with the current pool of colors."""
+        # Clean up old marbles
         for m in self.marbles:
             self.space.remove(m.body, m)
         self.marbles = []
         self.survivors = []
 
+        # Spawn new generation
         for color in self.current_colors:
             self.add_marble(color)
 
     def add_marble(self, color):
-        mass, moment = 1, pymunk.moment_for_circle(1, 0, MARBLE_RADIUS)
+        mass = 1
+        moment = pymunk.moment_for_circle(mass, 0, MARBLE_RADIUS)
         body = pymunk.Body(mass, moment)
-        body.position = (random.randint(50, GAME_WIDTH - 50), random.randint(-200, 0))
+        body.position = (random.randint(50, GAME_WIDTH - 50), random.randint(-200, -50))
         shape = pymunk.Circle(body, MARBLE_RADIUS)
+        shape.collision_type = 1
         shape.elasticity, shape.friction = 0.6, 0.5
         shape.custom_color = color
         self.space.add(body, shape)
@@ -83,68 +131,99 @@ class MarbleSurvival:
     def run(self):
         running = True
         button_rect = pygame.Rect(GAME_WIDTH + 20, HEIGHT - 60, 160, 40)
+        dt = 1 / FPS
 
         while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                if event.type == pygame.MOUSEBUTTONDOWN:
+                elif event.type == pygame.MOUSEBUTTONDOWN:
                     if button_rect.collidepoint(event.pos) and self.survivors:
-                        self.current_colors = [s for s in self.survivors]
+                        self.current_colors = list(set(self.survivors))  # Unique survivors
+                        self.round_count += 1
                         self.start_level()
 
-            self.space.step(1 / FPS)
+            # Update monster
+            self.update_monster(dt)
 
-            # Logic: Elimination and Survival
+            # Physics step
+            self.space.step(dt)
+
+            # Elimination logic (fire/safe zones)
             new_marbles = []
-            for m in self.marbles:
-                x, y = m.body.position
-                # FIRE ZONE: Bottom Left
-                if y > HEIGHT - 30 and x < GAME_WIDTH / 2:
-                    self.space.remove(m.body, m)
-                # SAFE ZONE: Bottom Right
-                elif y > HEIGHT - 30 and x >= GAME_WIDTH / 2:
-                    if m.custom_color not in self.survivors:
-                        self.survivors.append(m.custom_color)
-                    self.space.remove(m.body, m)
-                else:
-                    new_marbles.append(m)
+            for m in self.marbles[:]:
+                if m.body in self.space.bodies:  # Still active
+                    x, y = m.body.position
+                    if y > HEIGHT - 30:
+                        if x < GAME_WIDTH / 2:  # Fire zone - eliminated
+                            self.space.remove(m.body, m)
+                        else:  # Safe zone - survive
+                            if m.custom_color not in self.survivors:
+                                self.survivors.append(m.custom_color)
+                            self.space.remove(m.body, m)
+                    else:
+                        new_marbles.append(m)
             self.marbles = new_marbles
 
-            # Drawing
+            # Rendering
             self.screen.fill(BG_COLOR)
 
-            # Draw Pins
+            # Round count at top
+            round_text = self.big_font.render(f"Round: {self.round_count}", True, WHITE)
+            self.screen.blit(round_text, (10, 10))
+
+            # Draw pins
             for pin in self.pins:
                 pos = int(pin.offset.x), int(pin.offset.y)
                 pygame.draw.circle(self.screen, WHITE, pos, PIN_RADIUS)
 
-            # Draw Fire and Safe Zones
+            # Fire & Safe zones
             pygame.draw.rect(self.screen, FIRE_COLOR, (0, HEIGHT - 20, GAME_WIDTH // 2, 20))
             pygame.draw.rect(self.screen, SAFE_COLOR, (GAME_WIDTH // 2, HEIGHT - 20, GAME_WIDTH // 2, 20))
 
-            # Draw Marbles
+            # Draw marbles
             for m in self.marbles:
                 pos = int(m.body.position.x), int(m.body.position.y)
                 pygame.draw.circle(self.screen, m.custom_color, pos, MARBLE_RADIUS)
 
-            # --- UI Panel ---
+            # Draw monster (round, evil smile)
+            mx, my = int(self.monster_body.position.x), int(self.monster_body.position.y)
+            pygame.draw.circle(self.screen, DARK_GRAY, (mx, my), MONSTER_RADIUS)
+            # Eyes (glowing evil)
+            eye_offset = 6
+            pygame.draw.circle(self.screen, WHITE, (mx - eye_offset, my - 3), 5)
+            pygame.draw.circle(self.screen, WHITE, (mx + eye_offset, my - 3), 5)
+            pygame.draw.circle(self.screen, BLACK, (mx - eye_offset, my - 3), 2)
+            pygame.draw.circle(self.screen, BLACK, (mx + eye_offset, my - 3), 2)
+            # Evil smile (curved arc)
+            smile_rect = pygame.Rect(mx - 12, my + 2, 24, 12)
+            pygame.draw.arc(self.screen, (200, 50, 50), smile_rect, math.pi, 2 * math.pi, 4)
+            # Teeth (simple)
+            pygame.draw.line(self.screen, WHITE, (mx - 4, my + 8), (mx - 2, my + 8), 2)
+            pygame.draw.line(self.screen, WHITE, (mx + 2, my + 8), (mx + 4, my + 8), 2)
+
+            # UI Panel
             pygame.draw.rect(self.screen, PANEL_COLOR, (GAME_WIDTH, 0, WIDTH - GAME_WIDTH, HEIGHT))
-            title = self.font.render(f"Survivors: {len(self.survivors)}", True, WHITE)
-            self.screen.blit(title, (GAME_WIDTH + 10, 10))
+            survivors_text = self.font.render(f"Survivors: {len(self.survivors)}", True, WHITE)
+            self.screen.blit(survivors_text, (GAME_WIDTH + 10, 10))
 
-            # Draw surviving marble swatches
-            for i, color in enumerate(self.survivors):
-                row, col = i // 4, i % 4
-                pygame.draw.circle(self.screen, color, (GAME_WIDTH + 30 + col * 40, 60 + row * 40), 15)
+            # Survivor color swatches
+            for i, color in enumerate(self.survivors[-16:]):  # Show last 16 max
+                row, col = divmod(i, 4)
+                swatch_pos = (GAME_WIDTH + 30 + col * 40, 50 + row * 40)
+                pygame.draw.circle(self.screen, color, swatch_pos, 15)
 
-            # Level Button
-            pygame.draw.rect(self.screen, WHITE if self.survivors else (100, 100, 100), button_rect)
-            btn_text = self.font.render("ENTER NEXT LEVEL", True, (0, 0, 0))
-            self.screen.blit(btn_text, (button_rect.x + 10, button_rect.y + 10))
+            # Next Level button
+            button_color = WHITE if self.survivors else (100, 100, 100)
+            pygame.draw.rect(self.screen, button_color, button_rect)
+            pygame.draw.rect(self.screen, BLACK, button_rect, 2)
+            btn_text = self.font.render("NEXT LEVEL", True, BLACK)
+            text_rect = btn_text.get_rect(center=button_rect.center)
+            self.screen.blit(btn_text, text_rect)
 
             pygame.display.flip()
             self.clock.tick(FPS)
+
         pygame.quit()
 
 
