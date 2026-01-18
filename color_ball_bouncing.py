@@ -3,8 +3,9 @@ import pymunk
 import random
 import math
 
+
 # --- Configuration ---
-WIDTH, HEIGHT = 1000, 800  # Increased width for the UI panel
+WIDTH, HEIGHT = 1000, 1600  # Increased width for the UI panel
 GAME_WIDTH = 800
 FPS = 60
 GRAVITY = 900.0
@@ -13,6 +14,7 @@ PIN_RADIUS = 5
 MONSTER_RADIUS = 20  # 2x marble radius
 MONSTER_SPEED = 200  # pixels per second
 MONSTER_Y = 400  # Center height
+MAX_SURVIVOR_DISPLAY = 100
 
 # Colors
 WHITE = (255, 255, 255)
@@ -22,6 +24,12 @@ BG_COLOR = (100, 149, 237)
 FIRE_COLOR = (255, 69, 0)
 SAFE_COLOR = (50, 205, 50)
 PANEL_COLOR = (50, 50, 50)
+
+# Add these near MONSTER_SPEED etc.
+BAR_WIDTH = 180  # wider than monster
+BAR_HEIGHT = 12
+BAR_SPEED = MONSTER_SPEED * 2  # 2× monster speed
+BAR_Y = HEIGHT - 60  # just above the fire/safe zones
 
 
 class MarbleSurvival:
@@ -45,6 +53,22 @@ class MarbleSurvival:
             arbiter.process_collision = False
             return
 
+        # Bar bounce handler (collision_type 1 = marble, 3 = bar)
+        def bar_bounce(arbiter, space, data):
+            shape_a, shape_b = arbiter.shapes
+            marble = shape_a if hasattr(shape_a, 'custom_color') else shape_b
+
+            # Strong upward impulse
+            impulse_strength = 1200
+            marble.body.apply_impulse_at_local_point((0, -impulse_strength), (0, 0))
+
+            # Optional: tiny random horizontal kick for chaos
+            # marble.body.apply_impulse_at_local_point((random.uniform(-80, 80), 0), (0, 0))
+
+            return True  # normal collision still happens
+
+        self.space.on_collision(collision_type_a=1, collision_type_b=3, begin=bar_bounce)
+
         self.space.on_collision(collision_type_a=1, collision_type_b=2, begin=marble_monster_collision)
 
         self.marbles = []
@@ -56,7 +80,10 @@ class MarbleSurvival:
         self.create_boundaries()
         self.create_pins()
         self.create_monster()
+        self.create_bouncing_bar()
         self.start_level()
+
+
 
     def create_boundaries(self):
         # Walls
@@ -69,7 +96,7 @@ class MarbleSurvival:
             self.space.add(wall)
 
     def create_pins(self):
-        for row in range(10):
+        for row in range(20):
             for col in range(15):
                 x = (col * 50) + 50 + (25 if row % 2 == 0 else 0)
                 y = (row * 60) + 150
@@ -93,6 +120,39 @@ class MarbleSurvival:
         self.monster_dir = 1  # 1: right, -1: left
         self.monster_left_bound = MONSTER_RADIUS + 20
         self.monster_right_bound = GAME_WIDTH - MONSTER_RADIUS - 20
+
+    def create_bouncing_bar(self):
+        self.bar_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        self.bar_body.position = (GAME_WIDTH // 2, BAR_Y)
+
+        self.bar_shape = pymunk.Segment(
+            self.bar_body,
+            (-BAR_WIDTH // 2, 0),
+            (BAR_WIDTH // 2, 0),
+            BAR_HEIGHT // 2
+        )
+        self.bar_shape.elasticity = 0.9  # quite bouncy
+        self.bar_shape.friction = 0.3
+        self.bar_shape.collision_type = 3  # new type for bar
+
+        self.space.add(self.bar_body, self.bar_shape)
+
+        # Movement direction (same style as monster)
+        self.bar_dir = 1  # 1 = right, -1 = left
+        self.bar_left_bound = BAR_WIDTH // 2 + 40
+        self.bar_right_bound = GAME_WIDTH - BAR_WIDTH // 2 - 40
+
+    def update_bouncing_bar(self, dt):
+        self.bar_body.velocity = (BAR_SPEED * self.bar_dir, 0)
+
+        pos_x = self.bar_body.position.x
+
+        if pos_x <= self.bar_left_bound:
+            self.bar_dir = 1
+            self.bar_body.position = (self.bar_left_bound, BAR_Y)
+        elif pos_x >= self.bar_right_bound:
+            self.bar_dir = -1
+            self.bar_body.position = (self.bar_right_bound, BAR_Y)
 
     def update_monster(self, dt):
         self.monster_body.velocity = (MONSTER_SPEED * self.monster_dir, 0)
@@ -145,6 +205,7 @@ class MarbleSurvival:
 
             # Update monster
             self.update_monster(dt)
+            self.update_bouncing_bar(dt)
 
             # Physics step
             self.space.step(dt)
@@ -171,6 +232,17 @@ class MarbleSurvival:
             # Round count at top
             round_text = self.big_font.render(f"Round: {self.round_count}", True, WHITE)
             self.screen.blit(round_text, (10, 10))
+
+            # Draw bouncing bar
+            bx, by = int(self.bar_body.position.x), int(self.bar_body.position.y)
+            bar_color = (220, 100, 220)  # nice purple, or whatever you like
+            pygame.draw.rect(self.screen, bar_color,
+                           (bx - BAR_WIDTH//2, by - BAR_HEIGHT//2,
+                            BAR_WIDTH, BAR_HEIGHT), border_radius=6)
+            # Optional glow/highlight
+            pygame.draw.rect(self.screen, (255, 180, 255),
+                           (bx - BAR_WIDTH//2, by - BAR_HEIGHT//2,
+                            BAR_WIDTH, BAR_HEIGHT), 3, border_radius=6)
 
             # Draw pins
             for pin in self.pins:
@@ -208,11 +280,11 @@ class MarbleSurvival:
             self.screen.blit(survivors_text, (GAME_WIDTH + 10, 10))
 
             # Survivor color swatches
-            for i, color in enumerate(self.survivors):  # Show first 100 max
+            for i, color in enumerate(self.survivors):
                 row, col = divmod(i, 4)
                 swatch_pos = (GAME_WIDTH + 30 + col * 40, 50 + row * 40)
                 pygame.draw.circle(self.screen, color, swatch_pos, 15)
-                if i > 100:
+                if i > MAX_SURVIVOR_DISPLAY: # Show first 100 max
                     break
 
             # Next Level button
