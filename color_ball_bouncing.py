@@ -14,7 +14,7 @@ PIN_RADIUS = 5
 MONSTER_RADIUS = 20  # 2x marble radius
 MONSTER_SPEED = 200  # pixels per second
 MONSTER_Y = 400  # Center height
-MAX_SURVIVOR_DISPLAY = 100
+MAX_SURVIVOR_DISPLAY = 200
 
 # Colors
 WHITE = (255, 255, 255)
