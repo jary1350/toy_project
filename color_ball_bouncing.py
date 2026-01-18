@@ -7,7 +7,7 @@ import math
 WIDTH, HEIGHT = 1000, 800  # Increased width for the UI panel
 GAME_WIDTH = 800
 FPS = 60
-GRAVITY = 100.0
+GRAVITY = 900.0
 MARBLE_RADIUS = 10
 PIN_RADIUS = 5
 MONSTER_RADIUS = 20  # 2x marble radius
@@ -50,7 +50,7 @@ class MarbleSurvival:
         self.marbles = []
         self.survivors = []
         self.pins = []
-        self.current_colors = [(random.randint(50, 255), random.randint(50, 255), random.randint(50, 255)) for _ in range(1_00)]
+        self.current_colors = [(random.randint(50, 255), random.randint(50, 255), random.randint(50, 255)) for _ in range(1_000)]
         self.round_count = 1
 
         self.create_boundaries()
@@ -208,10 +208,12 @@ class MarbleSurvival:
             self.screen.blit(survivors_text, (GAME_WIDTH + 10, 10))
 
             # Survivor color swatches
-            for i, color in enumerate(self.survivors[-16:]):  # Show last 16 max
+            for i, color in enumerate(self.survivors):  # Show first 100 max
                 row, col = divmod(i, 4)
                 swatch_pos = (GAME_WIDTH + 30 + col * 40, 50 + row * 40)
                 pygame.draw.circle(self.screen, color, swatch_pos, 15)
+                if i > 100:
+                    break
 
             # Next Level button
             button_color = WHITE if self.survivors else (100, 100, 100)
