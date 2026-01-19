@@ -6,37 +6,40 @@ import math
 pygame.init()
 
 # Screen dimensions
-WIDTH, HEIGHT = 1200, 1600
+WIDTH, HEIGHT = 800, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Solar System Eating Game - Updated")
 
 # Colors
 BLACK = (0, 0, 0)
-YELLOW = (255, 255, 0)  # Sun
-GREEN = (0, 180, 0)  # Earth (now green)
-BLUE = (30, 144, 255)  # Neptune (nice deep blue)
-PEACH = (255, 218, 185)  # Jupiter (peach)
-RED = (220, 20, 60)
+YELLOW = (255, 215, 0)  # Bright sun
+SUN_COLOR = (255, 200, 80)  # Slightly softer sun color
+SATURN_COLOR = (180, 140, 60)  # Yellowish-brown
+RING_COLOR = (220, 200, 180)  # Light creamy rings for Saturn
+URANUS_RING_COLOR = (180, 220, 255)  # Pale cyan-ish rings for Uranus
+
+GREEN = (0, 180, 0)  # Earth
+BLUE = (30, 144, 255)  # Neptune
+PEACH = (255, 218, 185)  # Jupiter
+RED = (220, 20, 60)  # Mars
 ORANGE = (255, 140, 0)  # Venus
-PURPLE = (180, 100, 255)  # Saturn (distinct from Jupiter)
-CYAN = (0, 255, 255)
+CYAN = (0, 255, 255)  # Uranus body
 GRAY = (169, 169, 169)  # Mercury
-RING_COLOR = (200, 200, 220)  # Saturn's rings
 
-# Sun properties
+# Sun properties - now 1/15 of width
+SUN_RADIUS = WIDTH // 15  # ≈53 pixels on 800px screen
 SUN_POS = (WIDTH // 2, HEIGHT // 2)
-SUN_RADIUS = WIDTH/10
 
-# Planet data (name, radius, color) - updated colors
+# Planet data (name, radius, color)
 PLANETS_DATA = [
     ("Mercury", 5, GRAY),
     ("Venus", 12, ORANGE),
-    ("Earth", 13, GREEN),  # Now green!
+    ("Earth", 13, GREEN),
     ("Mars", 7, RED),
-    ("Jupiter", 50, PEACH),  # Now peach!
-    ("Saturn", 40, PURPLE),  # Purple body + rings
+    ("Jupiter", 50, PEACH),
+    ("Saturn", 40, SATURN_COLOR),  # Now yellowish-brown
     ("Uranus", 20, CYAN),
-    ("Neptune", 20, BLUE)  # Now blue!
+    ("Neptune", 20, BLUE)
 ]
 
 # Asteroid properties
@@ -85,8 +88,10 @@ while running:
 
     screen.fill(BLACK)
 
-    # Draw Sun
-    pygame.draw.circle(screen, YELLOW, SUN_POS, SUN_RADIUS)
+    # Draw Sun (bigger but still reasonable size)
+    pygame.draw.circle(screen, SUN_COLOR, SUN_POS, SUN_RADIUS)
+    # Slight glow effect
+    pygame.draw.circle(screen, (255, 230, 150, 120), SUN_POS, SUN_RADIUS + 12, 12)
 
     active_bodies = [body for body in bodies if body["active"]]
 
@@ -113,11 +118,15 @@ while running:
         x, y = int(body["pos"][0]), int(body["pos"][1])
         pygame.draw.circle(screen, body["color"], (x, y), body["radius"])
 
-        # Special case: Draw rings for Saturn
+        # Draw rings for Saturn
         if body["name"] == "Saturn":
-            # Draw 3 thin rings
-            for r in range(body["radius"] + 8, body["radius"] + 22, 4):
-                pygame.draw.circle(screen, RING_COLOR, (x, y), r, 2)
+            for r in range(body["radius"] + 10, body["radius"] + 28, 5):
+                pygame.draw.circle(screen, RING_COLOR, (x, y), r, 3)
+
+        # Draw rings for Uranus (fainter, thinner)
+        if body["name"] == "Uranus":
+            for r in range(body["radius"] + 6, body["radius"] + 18, 4):
+                pygame.draw.circle(screen, URANUS_RING_COLOR, (x, y), r, 1)
 
     # Handle collisions between bodies
     i = 0
