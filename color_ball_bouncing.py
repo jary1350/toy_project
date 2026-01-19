@@ -11,10 +11,17 @@ FPS = 60
 GRAVITY = 900.0
 MARBLE_RADIUS = 10
 PIN_RADIUS = 5
+MAX_SURVIVOR_DISPLAY = 200
+
+# 1st monster
 MONSTER_RADIUS = 20  # 2x marble radius
 MONSTER_SPEED = 200  # pixels per second
 MONSTER_Y = 400  # Center height
-MAX_SURVIVOR_DISPLAY = 200
+
+# --- Configuration (ADD these near existing monster config) ---
+MONSTER2_RADIUS = 60      # 3x MARBLE_RADIUS=20
+MONSTER2_SPEED = 150      # Slower for big boy
+MONSTER2_Y = 800         # Lower than first monster (740)
 
 # Colors
 WHITE = (255, 255, 255)
@@ -71,6 +78,9 @@ class MarbleSurvival:
 
         self.space.on_collision(collision_type_a=1, collision_type_b=2, begin=marble_monster_collision)
 
+        self.space.on_collision(collision_type_a=1, collision_type_b=4, begin=marble_monster_collision)
+
+
         self.marbles = []
         self.survivors = []
         self.pins = []
@@ -80,6 +90,7 @@ class MarbleSurvival:
         self.create_boundaries()
         self.create_pins()
         self.create_monster()
+        self.create_monster2()
         self.create_bouncing_bar()
         self.start_level()
 
@@ -120,6 +131,21 @@ class MarbleSurvival:
         self.monster_dir = 1  # 1: right, -1: left
         self.monster_left_bound = MONSTER_RADIUS + 20
         self.monster_right_bound = GAME_WIDTH - MONSTER_RADIUS - 20
+
+    # NEW METHOD: create_monster2() (add after create_monster())
+    def create_monster2(self):
+        # Big kinematic body
+        self.monster2_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        self.monster2_body.position = (GAME_WIDTH - 100, MONSTER2_Y)  # Start RIGHT side
+        self.monster2_shape = pymunk.Circle(self.monster2_body, MONSTER2_RADIUS)
+        self.monster2_shape.collision_type = 4
+        self.monster2_shape.elasticity = 0.95  # Very bouncy
+        self.monster2_shape.friction = 0.4
+        self.space.add(self.monster2_body, self.monster2_shape)
+
+        self.monster2_dir = -1  # Start moving LEFT from right
+        self.monster2_left_bound = MONSTER2_RADIUS + 40
+        self.monster2_right_bound = GAME_WIDTH - MONSTER2_RADIUS - 40
 
     def create_bouncing_bar(self):
         self.bar_body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
@@ -164,6 +190,17 @@ class MarbleSurvival:
             self.monster_dir = -1
             self.monster_body.position = (self.monster_right_bound, MONSTER_Y)
 
+        # NEW METHOD: update_monster2() (add after update_monster())
+    def update_monster2(self, dt):
+        self.monster2_body.velocity = (MONSTER2_SPEED * self.monster2_dir, 0)
+        pos_x = self.monster2_body.position.x
+        if pos_x <= self.monster2_left_bound:
+            self.monster2_dir = 1
+            self.monster2_body.position = (self.monster2_left_bound, MONSTER2_Y)
+        elif pos_x >= self.monster2_right_bound:
+            self.monster2_dir = -1
+            self.monster2_body.position = (self.monster2_right_bound, MONSTER2_Y)
+
     def start_level(self):
         """Resets the game with the current pool of colors."""
         # Clean up old marbles
@@ -205,6 +242,7 @@ class MarbleSurvival:
 
             # Update monster
             self.update_monster(dt)
+            self.update_monster2(dt)
             self.update_bouncing_bar(dt)
 
             # Physics step
@@ -258,21 +296,9 @@ class MarbleSurvival:
                 pos = int(m.body.position.x), int(m.body.position.y)
                 pygame.draw.circle(self.screen, m.custom_color, pos, MARBLE_RADIUS)
 
-            # Draw monster (round, evil smile)
-            mx, my = int(self.monster_body.position.x), int(self.monster_body.position.y)
-            pygame.draw.circle(self.screen, DARK_GRAY, (mx, my), MONSTER_RADIUS)
-            # Eyes (glowing evil)
-            eye_offset = 6
-            pygame.draw.circle(self.screen, WHITE, (mx - eye_offset, my - 3), 5)
-            pygame.draw.circle(self.screen, WHITE, (mx + eye_offset, my - 3), 5)
-            pygame.draw.circle(self.screen, BLACK, (mx - eye_offset, my - 3), 2)
-            pygame.draw.circle(self.screen, BLACK, (mx + eye_offset, my - 3), 2)
-            # Evil smile (curved arc)
-            smile_rect = pygame.Rect(mx - 12, my + 2, 24, 12)
-            pygame.draw.arc(self.screen, (200, 50, 50), smile_rect, math.pi, 2 * math.pi, 4)
-            # Teeth (simple)
-            pygame.draw.line(self.screen, WHITE, (mx - 4, my + 8), (mx - 2, my + 8), 2)
-            pygame.draw.line(self.screen, WHITE, (mx + 2, my + 8), (mx + 4, my + 8), 2)
+            self.draw_monster()
+
+            self.draw_moster2()
 
             # UI Panel
             pygame.draw.rect(self.screen, PANEL_COLOR, (GAME_WIDTH, 0, WIDTH - GAME_WIDTH, HEIGHT))
@@ -299,6 +325,45 @@ class MarbleSurvival:
             self.clock.tick(FPS)
 
         pygame.quit()
+
+    def draw_monster(self):
+        # Draw monster (round, evil smile)
+        mx, my = int(self.monster_body.position.x), int(self.monster_body.position.y)
+        pygame.draw.circle(self.screen, DARK_GRAY, (mx, my), MONSTER_RADIUS)
+        # Eyes (glowing evil)
+        eye_offset = 6
+        pygame.draw.circle(self.screen, WHITE, (mx - eye_offset, my - 3), 5)
+        pygame.draw.circle(self.screen, WHITE, (mx + eye_offset, my - 3), 5)
+        pygame.draw.circle(self.screen, BLACK, (mx - eye_offset, my - 3), 2)
+        pygame.draw.circle(self.screen, BLACK, (mx + eye_offset, my - 3), 2)
+        # Evil smile (curved arc)
+        smile_rect = pygame.Rect(mx - 12, my + 2, 24, 12)
+        pygame.draw.arc(self.screen, (200, 50, 50), smile_rect, math.pi, 2 * math.pi, 4)
+        # Teeth (simple)
+        pygame.draw.line(self.screen, WHITE, (mx - 4, my + 8), (mx - 2, my + 8), 2)
+        pygame.draw.line(self.screen, WHITE, (mx + 2, my + 8), (mx + 4, my + 8), 2)
+
+    def draw_moster2(self):
+        # Draw Monster2 (bigger, eviler)
+        m2x, m2y = int(self.monster2_body.position.x), int(self.monster2_body.position.y)
+        pygame.draw.circle(self.screen, (30, 30, 50), (m2x, m2y), MONSTER2_RADIUS)  # Darker gray/purple
+        # Eyes (scaled 3x)
+        eye_offset = 18
+        eye_size = 15
+        pupil_size = 6
+        pygame.draw.circle(self.screen, (255, 200, 200), (m2x - eye_offset, m2y - 9), eye_size)  # Glowing pinkish
+        pygame.draw.circle(self.screen, (255, 200, 200), (m2x + eye_offset, m2y - 9), eye_size)
+        pygame.draw.circle(self.screen, BLACK, (m2x - eye_offset, m2y - 9), pupil_size)
+        pygame.draw.circle(self.screen, BLACK, (m2x + eye_offset, m2y - 9), pupil_size)
+        # Evil smile (scaled)
+        smile_rect = pygame.Rect(m2x - 36, m2y + 12, 72, 36)
+        pygame.draw.arc(self.screen, (255, 100, 100), smile_rect, math.pi, 2 * math.pi, 12)  # Thicker fiery arc
+        # Teeth (more menacing)
+        for i in range(3):  # 6 teeth
+            tx = m2x - 20 + i * 13
+            pygame.draw.line(self.screen, WHITE, (tx, m2y + 24), (tx + 8, m2y + 24), 5)
+            tx = m2x + 6 + i * 13
+            pygame.draw.line(self.screen, WHITE, (tx, m2y + 24), (tx + 8, m2y + 24), 5)
 
 
 if __name__ == "__main__":
