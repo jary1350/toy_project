@@ -1,9 +1,11 @@
 import pygame
 import random
 import math
+import numpy as np
 
 # Initialize Pygame
 pygame.init()
+pygame.mixer.init()
 
 # Screen dimensions
 WIDTH, HEIGHT = 800, 600
@@ -110,6 +112,21 @@ def spawn_flare():
         "lifetime": 300  # Frames until flare expires
     }
     return flare
+
+
+def create_beep_sound(frequency, duration_ms, sample_rate=22050):
+    """Create a simple beep sound with given frequency and duration"""
+    frames = int(duration_ms * sample_rate / 1000)
+    arr = np.sin(2.0 * np.pi * np.arange(frames) * frequency / sample_rate)
+    arr = (arr * 32767).astype(np.int16)
+    arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
+    sound = pygame.sndarray.make_sound(arr)
+    return sound
+
+
+# Create sound effects
+flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
+swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
 
 
 # Main game loop
@@ -235,6 +252,7 @@ while running:
             sum_r = flare["radius"] + body["radius"]
             if dist_sq < sum_r * sum_r:
                 body["active"] = False
+                flare_hit_sound.play()
                 if flare in flares:
                     flares.remove(flare)
                 break
@@ -250,10 +268,12 @@ while running:
                     # b1 eats b2: increase b1's radius by b2's radius
                     b1["radius"] += b2["radius"]
                     b2["active"] = False
+                    swallow_sound.play()
                 elif b2["radius"] > b1["radius"]:
                     # b2 eats b1: increase b2's radius by b1's radius
                     b2["radius"] += b1["radius"]
                     b1["active"] = False
+                    swallow_sound.play()
                 # Equal size: both survive
 
     # Check win condition
