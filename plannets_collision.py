@@ -35,13 +35,13 @@ EARTH_SPEED = 5.0
 
 # Planet data
 PLANETS_DATA = [
-    ("Mercury", 5, GRAY),
+    ("Mercury", 10, GRAY),
     ("Venus", 12, ORANGE),
-    ("Earth", 13, GREEN),
-    ("Mars", 7, RED),
+    ("Earth", 14, GREEN),
+    ("Mars", 10, RED),
     ("Jupiter", 50, PEACH),
     ("Saturn", 40, SATURN_COLOR),
-    ("Uranus", 20, CYAN),
+    ("Uranus", 24, CYAN),
     ("Neptune", 20, BLUE)
 ]
 
@@ -49,6 +49,16 @@ PLANETS_DATA = [
 NUM_ASTEROIDS = 50
 ASTEROID_RADIUS = 3
 ASTEROID_COLOR = (150, 150, 150)
+
+# Flare properties
+FLARE_RADIUS = 5
+FLARE_COLOR = (255, 100, 0)  # Orange fireball
+FLARE_SPAWN_CHANCE = 0.02  # 2% chance per frame
+FLARE_SPEED = 4
+
+# Game level
+LEVEL = 1
+FLARE_FREQUENCY_MULTIPLIER = 1.0
 
 
 def create_body(name, radius, color, is_asteroid=False):
@@ -73,8 +83,11 @@ def create_body(name, radius, color, is_asteroid=False):
 
 # Create planets and asteroids
 bodies = [create_body(name, radius, color) for name, radius, color in PLANETS_DATA]
-for _ in range(NUM_ASTEROIDS):
+for _ in range(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1)))):
     bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
+
+# Flares list
+flares = []
 
 
 def check_collision(body1, body2):
@@ -85,18 +98,68 @@ def check_collision(body1, body2):
     return dist_sq < sum_r * sum_r
 
 
+def spawn_flare():
+    """Spawn a flare from the sun in a random direction"""
+    angle = random.uniform(0, 2 * math.pi)
+    vel = (FLARE_SPEED * math.cos(angle), FLARE_SPEED * math.sin(angle))
+    flare = {
+        "pos": list(SUN_POS),
+        "vel": vel,
+        "radius": FLARE_RADIUS,
+        "color": FLARE_COLOR,
+        "lifetime": 300  # Frames until flare expires
+    }
+    return flare
+
+
 # Main game loop
 running = True
 clock = pygame.time.Clock()
+game_over = False
+level_passed = False
+font = pygame.font.Font(None, 36)
+large_font = pygame.font.Font(None, 72)
 
 while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_SPACE:
+                if level_passed:
+                    # Next level
+                    LEVEL += 1
+                    FLARE_FREQUENCY_MULTIPLIER = 1.0 * (1.5 ** (LEVEL - 1))
+                    level_passed = False
+                    game_over = False
+                    # Reset bodies with new counts
+                    bodies.clear()
+                    bodies.extend([create_body(name, radius, color) for name, radius, color in PLANETS_DATA])
+                    for _ in range(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1)))):
+                        bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
+                    flares.clear()
+                elif game_over:
+                    # Restart from level 1
+                    LEVEL = 1
+                    FLARE_FREQUENCY_MULTIPLIER = 1.0
+                    game_over = False
+                    level_passed = False
+                    # Reset bodies
+                    bodies.clear()
+                    bodies.extend([create_body(name, radius, color) for name, radius, color in PLANETS_DATA])
+                    for _ in range(NUM_ASTEROIDS):
+                        bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
+                    flares.clear()
 
     screen.fill(BLACK)
 
     keys = pygame.key.get_pressed()
+
+    # Spawn flares randomly with level-based frequency
+    if not level_passed and not game_over:
+        spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
+        if random.random() < spawn_chance:
+            flares.append(spawn_flare())
 
     # Update phase: move, bounce, sun collision
     for body in bodies:
@@ -149,6 +212,33 @@ while running:
         if dist_sq < sum_r * sum_r:
             body["active"] = False
 
+    # Update flares
+    for flare in flares[:]:
+        flare["pos"][0] += flare["vel"][0]
+        flare["pos"][1] += flare["vel"][1]
+        flare["lifetime"] -= 1
+
+        # Remove flare if it goes off screen or expires
+        if (flare["pos"][0] < -FLARE_RADIUS or flare["pos"][0] > WIDTH + FLARE_RADIUS or
+            flare["pos"][1] < -FLARE_RADIUS or flare["pos"][1] > HEIGHT + FLARE_RADIUS or
+            flare["lifetime"] <= 0):
+            flares.remove(flare)
+
+    # Flare collisions with bodies
+    for flare in flares[:]:
+        for body in bodies[:]:
+            if not body["active"]:
+                continue
+            dx = flare["pos"][0] - body["pos"][0]
+            dy = flare["pos"][1] - body["pos"][1]
+            dist_sq = dx * dx + dy * dy
+            sum_r = flare["radius"] + body["radius"]
+            if dist_sq < sum_r * sum_r:
+                body["active"] = False
+                if flare in flares:
+                    flares.remove(flare)
+                break
+
     # Planet/Asteroid collisions (only among active survivors)
     active_bodies = [b for b in bodies if b["active"]]
     for i in range(len(active_bodies)):
@@ -157,10 +247,26 @@ while running:
             b2 = active_bodies[j]
             if check_collision(b1, b2):
                 if b1["radius"] > b2["radius"]:
+                    # b1 eats b2: increase b1's radius by b2's radius
+                    b1["radius"] += b2["radius"]
                     b2["active"] = False
                 elif b2["radius"] > b1["radius"]:
+                    # b2 eats b1: increase b2's radius by b1's radius
+                    b2["radius"] += b1["radius"]
                     b1["active"] = False
                 # Equal size: both survive
+
+    # Check win condition
+    active_bodies = [b for b in bodies if b["active"]]
+    earth_alive = any(b for b in active_bodies if b["name"] == "Earth")
+    planets_alive = [b for b in active_bodies if b["name"] != "Asteroid"]
+    
+    if earth_alive and len(planets_alive) == 1:
+        # Only Earth remains - Level passed!
+        level_passed = True
+    elif not earth_alive:
+        # Earth destroyed - Game Over
+        game_over = True
 
     # Draw Sun with glow
     pygame.draw.circle(screen, SUN_COLOR, SUN_POS, SUN_RADIUS)
@@ -181,6 +287,35 @@ while running:
         if body["name"] == "Uranus":
             for r in range(body["radius"] + 6, body["radius"] + 18, 4):
                 pygame.draw.circle(screen, URANUS_RING_COLOR, (x, y), r, 1)
+
+    # Draw flares
+    for flare in flares:
+        x, y = int(flare["pos"][0]), int(flare["pos"][1])
+        pygame.draw.circle(screen, flare["color"], (x, y), flare["radius"])
+        # Add glow effect to flares
+        pygame.draw.circle(screen, (255, 150, 50, 100), (x, y), flare["radius"] + 5, 2)
+
+    # Display level
+    level_text = font.render(f"Level: {LEVEL}", True, (255, 255, 255))
+    screen.blit(level_text, (10, 10))
+
+    # Draw level passed or game over message
+    if level_passed:
+        success_text = large_font.render("SUCCESS!", True, (0, 255, 0))
+        passed_text = font.render("Level Passed!", True, (0, 255, 0))
+        space_text = font.render("Press SPACE to continue", True, (255, 255, 255))
+        screen.blit(success_text, (WIDTH // 2 - 180, HEIGHT // 2 - 80))
+        screen.blit(passed_text, (WIDTH // 2 - 120, HEIGHT // 2))
+        screen.blit(space_text, (WIDTH // 2 - 140, HEIGHT // 2 + 60))
+    elif game_over:
+        gameover_text = large_font.render("GAME OVER", True, (255, 0, 0))
+        dead_text = font.render("Earth destroyed!", True, (255, 0, 0))
+        level_gameover_text = font.render(f"Level: {LEVEL}", True, (255, 255, 100))
+        restart_text = font.render("Press SPACE to restart from Level 1", True, (255, 255, 255))
+        screen.blit(gameover_text, (WIDTH // 2 - 200, HEIGHT // 2 - 80))
+        screen.blit(dead_text, (WIDTH // 2 - 130, HEIGHT // 2 - 10))
+        screen.blit(level_gameover_text, (WIDTH // 2 - 80, HEIGHT // 2 + 40))
+        screen.blit(restart_text, (WIDTH // 2 - 180, HEIGHT // 2 + 90))
 
     # Prune inactive bodies
     bodies[:] = [b for b in bodies if b["active"]]
