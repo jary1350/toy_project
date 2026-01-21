@@ -22,6 +22,8 @@ GREEN = (0, 255, 0)
 RED = (255, 0, 0)
 YELLOW = (255, 255, 0)
 GRAY = (128, 128, 128)
+BLUE = (0, 100, 255)
+LIGHT_GRAY = (180, 180, 180)
 
 class Direction(Enum):
     UP = (0, -1)
@@ -44,21 +46,28 @@ class SnakeGame:
     
     def reset_game(self):
         """Reset game to initial state"""
-        # Initialize snake in the middle
-        self.snake = [(GRID_WIDTH // 2, GRID_HEIGHT // 2)]
+        # Initialize player snake in the middle-left
+        self.snake = [(GRID_WIDTH // 3, GRID_HEIGHT // 2)]
         self.direction = Direction.RIGHT
         self.next_direction = Direction.RIGHT
         
-        # Spawn first apple
-        self.apple = self.spawn_apple()
+        # Initialize rival snake in the middle-right
+        self.rival_snake = [(2 * GRID_WIDTH // 3, GRID_HEIGHT // 2)]
+        self.rival_direction = Direction.LEFT
+        
+        # Spawn two apples
+        self.apple1 = self.spawn_apple()
+        self.apple2 = self.spawn_apple()
         
         # Score and level
         self.score = 0
         self.level = 1
         self.apples_eaten_this_level = 0
+        self.rival_apples_eaten = 0
         
         self.game_over = False
         self.level_passed = False
+        self.player_won = True  # Track if player won or lost
         
     def create_beep_sound(self):
         """Create a simple beep sound using numpy and pygame"""
@@ -81,12 +90,19 @@ class SnakeGame:
             self.beep_sound = None
     
     def spawn_apple(self):
-        """Spawn apple at random location not occupied by snake"""
+        """Spawn apple at random location not occupied by any snake or apple"""
         while True:
             x = random.randint(0, GRID_WIDTH - 1)
             y = random.randint(0, GRID_HEIGHT - 1)
-            if (x, y) not in self.snake:
-                return (x, y)
+            pos = (x, y)
+            # Check if position is free
+            if pos not in self.snake and pos not in self.rival_snake:
+                # Also check it's not on existing apples
+                if hasattr(self, 'apple1') and pos == self.apple1:
+                    continue
+                if hasattr(self, 'apple2') and pos == self.apple2:
+                    continue
+                return pos
     
     def handle_input(self):
         """Handle keyboard input"""
@@ -117,54 +133,156 @@ class SnakeGame:
         """Advance to next level"""
         self.level += 1
         self.apples_eaten_this_level = 0
+        self.rival_apples_eaten = 0
         self.level_passed = False
         
-        # Keep score and snake, just reset apple position
-        self.apple = self.spawn_apple()
+        # Keep score and snakes, just reset apple positions
+        self.apple1 = self.spawn_apple()
+        self.apple2 = self.spawn_apple()
+    
+    def get_rival_direction(self):
+        """AI to move rival snake toward nearest apple"""
+        head_x, head_y = self.rival_snake[0]
+        
+        # Find nearest apple
+        dist1 = abs(head_x - self.apple1[0]) + abs(head_y - self.apple1[1])
+        dist2 = abs(head_x - self.apple2[0]) + abs(head_y - self.apple2[1])
+        target = self.apple1 if dist1 <= dist2 else self.apple2
+        
+        # Simple AI: move toward target, avoiding reverse direction
+        target_x, target_y = target
+        possible_directions = []
+        
+        # Prioritize horizontal or vertical movement based on distance
+        if target_x < head_x and self.rival_direction != Direction.RIGHT:
+            possible_directions.append(Direction.LEFT)
+        if target_x > head_x and self.rival_direction != Direction.LEFT:
+            possible_directions.append(Direction.RIGHT)
+        if target_y < head_y and self.rival_direction != Direction.DOWN:
+            possible_directions.append(Direction.UP)
+        if target_y > head_y and self.rival_direction != Direction.UP:
+            possible_directions.append(Direction.DOWN)
+        
+        # If we have valid directions, choose one
+        if possible_directions:
+            return random.choice(possible_directions)
+        
+        # Otherwise keep current direction if valid, or pick random safe direction
+        return self.rival_direction
     
     def update(self):
         """Update game state"""
         if self.game_over or self.level_passed:
             return
         
-        # Update direction
+        # Update player direction
         self.direction = self.next_direction
         
-        # Calculate new head position
+        # Update rival direction (AI)
+        self.rival_direction = self.get_rival_direction()
+        
+        # Calculate new head position for player
         head_x, head_y = self.snake[0]
         dx, dy = self.direction.value
-        new_head = (head_x + dx, new_head_y := head_y + dy)
+        new_head = (head_x + dx, head_y + dy)
         
-        # Check wall collision
+        # Calculate new head position for rival
+        rival_head_x, rival_head_y = self.rival_snake[0]
+        rival_dx, rival_dy = self.rival_direction.value
+        new_rival_head = (rival_head_x + rival_dx, rival_head_y + rival_dy)
+        
+        # Check player wall collision
         if new_head[0] < 0 or new_head[0] >= GRID_WIDTH or \
            new_head[1] < 0 or new_head[1] >= GRID_HEIGHT:
             self.game_over = True
+            self.player_won = False
             return
         
-        # Check self collision
+        # Check rival wall collision
+        rival_died = False
+        if new_rival_head[0] < 0 or new_rival_head[0] >= GRID_WIDTH or \
+           new_rival_head[1] < 0 or new_rival_head[1] >= GRID_HEIGHT:
+            rival_died = True
+        
+        # Check player self collision
         if new_head in self.snake:
             self.game_over = True
+            self.player_won = False
             return
         
-        # Add new head
-        self.snake.insert(0, new_head)
+        # Check rival self collision
+        if not rival_died and new_rival_head in self.rival_snake:
+            rival_died = True
         
-        # Check if apple eaten
-        if new_head == self.apple:
+        # Check collision between snakes (before adding new heads)
+        # Player hits rival snake
+        if new_head in self.rival_snake:
+            self.game_over = True
+            self.player_won = False
+            return
+        
+        # Rival hits player snake
+        if not rival_died and new_rival_head in self.snake:
+            rival_died = True
+        
+        # Head-to-head collision
+        if new_head == new_rival_head:
+            self.game_over = True
+            self.player_won = False
+            return
+        
+        # Add new heads
+        self.snake.insert(0, new_head)
+        if not rival_died:
+            self.rival_snake.insert(0, new_rival_head)
+        
+        # Check if player ate apple
+        player_ate = False
+        if new_head == self.apple1:
             self.score += 10
             self.apples_eaten_this_level += 1
-            self.apple = self.spawn_apple()
-            
+            self.apple1 = self.spawn_apple()
+            player_ate = True
+        elif new_head == self.apple2:
+            self.score += 10
+            self.apples_eaten_this_level += 1
+            self.apple2 = self.spawn_apple()
+            player_ate = True
+        
+        if player_ate:
             # Play beep sound
             if self.beep_sound:
                 self.beep_sound.play()
             
-            # Check if level completed
+            # Check if player won level
             if self.apples_eaten_this_level >= APPLES_PER_LEVEL:
                 self.level_passed = True
+                self.player_won = True
         else:
             # Remove tail if didn't eat apple
             self.snake.pop()
+        
+        # Check if rival ate apple
+        if not rival_died:
+            rival_ate = False
+            if new_rival_head == self.apple1:
+                self.rival_apples_eaten += 1
+                self.apple1 = self.spawn_apple()
+                rival_ate = True
+            elif new_rival_head == self.apple2:
+                self.rival_apples_eaten += 1
+                self.apple2 = self.spawn_apple()
+                rival_ate = True
+            
+            # Check if rival won
+            if self.rival_apples_eaten >= APPLES_PER_LEVEL:
+                self.game_over = True
+                self.player_won = False
+                return
+            
+            if not rival_ate:
+                # Remove rival tail if didn't eat apple
+                self.rival_snake.pop()
     
     def draw(self):
         """Draw game screen"""
@@ -176,7 +294,7 @@ class SnakeGame:
         for y in range(0, WINDOW_HEIGHT, GRID_SIZE):
             pygame.draw.line(self.screen, GRAY, (0, y), (WINDOW_WIDTH, y), 1)
         
-        # Draw snake
+        # Draw player snake (green head, white body)
         for i, (x, y) in enumerate(self.snake):
             rect = pygame.Rect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2)
             if i == 0:  # Head
@@ -184,11 +302,24 @@ class SnakeGame:
             else:  # Body
                 pygame.draw.rect(self.screen, WHITE, rect)
         
-        # Draw apple
-        apple_x, apple_y = self.apple
-        apple_rect = pygame.Rect(apple_x * GRID_SIZE + 2, apple_y * GRID_SIZE + 2, 
-                                  GRID_SIZE - 4, GRID_SIZE - 4)
-        pygame.draw.rect(self.screen, RED, apple_rect)
+        # Draw rival snake (blue head, light gray body)
+        for i, (x, y) in enumerate(self.rival_snake):
+            rect = pygame.Rect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2)
+            if i == 0:  # Head
+                pygame.draw.rect(self.screen, BLUE, rect)
+            else:  # Body
+                pygame.draw.rect(self.screen, LIGHT_GRAY, rect)
+        
+        # Draw both apples
+        apple1_x, apple1_y = self.apple1
+        apple1_rect = pygame.Rect(apple1_x * GRID_SIZE + 2, apple1_y * GRID_SIZE + 2, 
+                                   GRID_SIZE - 4, GRID_SIZE - 4)
+        pygame.draw.rect(self.screen, RED, apple1_rect)
+        
+        apple2_x, apple2_y = self.apple2
+        apple2_rect = pygame.Rect(apple2_x * GRID_SIZE + 2, apple2_y * GRID_SIZE + 2, 
+                                   GRID_SIZE - 4, GRID_SIZE - 4)
+        pygame.draw.rect(self.screen, RED, apple2_rect)
         
         # Draw score
         score_text = self.font.render(f"Score: {self.score}", True, WHITE)
@@ -198,17 +329,17 @@ class SnakeGame:
         level_text = self.font.render(f"Level: {self.level}", True, WHITE)
         self.screen.blit(level_text, (10, 50))
         
-        # Draw length
-        length_text = self.font.render(f"Length: {len(self.snake)}", True, WHITE)
-        self.screen.blit(length_text, (10, 90))
+        # Draw player progress (green color)
+        player_text = self.font.render(f"You: {self.apples_eaten_this_level}/{APPLES_PER_LEVEL}", True, GREEN)
+        self.screen.blit(player_text, (10, 90))
         
-        # Draw apples progress
-        apples_text = self.font.render(f"Apples: {self.apples_eaten_this_level}/{APPLES_PER_LEVEL}", True, WHITE)
-        self.screen.blit(apples_text, (10, 130))
+        # Draw rival progress (blue color)
+        rival_text = self.font.render(f"Rival: {self.rival_apples_eaten}/{APPLES_PER_LEVEL}", True, BLUE)
+        self.screen.blit(rival_text, (10, 130))
         
         # Draw level passed message
         if self.level_passed:
-            level_passed_text = self.font.render("LEVEL PASSED!", True, YELLOW)
+            level_passed_text = self.font.render("YOU WON THE LEVEL!", True, YELLOW)
             text_rect = level_passed_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 30))
             self.screen.blit(level_passed_text, text_rect)
             
@@ -218,7 +349,10 @@ class SnakeGame:
         
         # Draw game over message
         if self.game_over:
-            game_over_text = self.font.render("GAME OVER!", True, YELLOW)
+            if self.player_won:
+                game_over_text = self.font.render("YOU WON!", True, GREEN)
+            else:
+                game_over_text = self.font.render("YOU LOST!", True, RED)
             text_rect = game_over_text.get_rect(center=(WINDOW_WIDTH // 2, WINDOW_HEIGHT // 2 - 30))
             self.screen.blit(game_over_text, text_rect)
             
