@@ -12,7 +12,7 @@ WINDOW_HEIGHT = 600
 GRID_SIZE = 20
 GRID_WIDTH = WINDOW_WIDTH // GRID_SIZE
 GRID_HEIGHT = WINDOW_HEIGHT // GRID_SIZE
-BASE_FPS = 7  # Level 1 speed
+BASE_FPS = 5  # Level 1 speed (slower movement)
 APPLES_PER_LEVEL = 10
 
 # Colors
@@ -24,6 +24,17 @@ YELLOW = (255, 255, 0)
 GRAY = (128, 128, 128)
 BLUE = (0, 100, 255)
 LIGHT_GRAY = (180, 180, 180)
+CYAN = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+ORANGE = (255, 165, 0)
+PURPLE = (128, 0, 128)
+PINK = (255, 192, 203)
+
+def get_random_rival_color():
+    """Generate a random color for rival that's not green or red"""
+    rival_colors = [BLUE, CYAN, MAGENTA, ORANGE, PURPLE, PINK, YELLOW, 
+                    (100, 100, 255), (255, 100, 100), (100, 255, 255)]
+    return random.choice(rival_colors)
 
 class Direction(Enum):
     UP = (0, -1)
@@ -78,6 +89,7 @@ class SnakeGame:
         self.rival_snakes = []
         self.rival_directions = []
         self.rival_apples_eaten = []
+        self.rival_colors = []  # Store random colors for each rival
         
         for i in range(num_rivals):
             # Spread rivals across the screen
@@ -86,6 +98,7 @@ class SnakeGame:
             self.rival_snakes.append([(start_x % GRID_WIDTH, start_y % GRID_HEIGHT)])
             self.rival_directions.append(Direction.LEFT)
             self.rival_apples_eaten.append(0)
+            self.rival_colors.append(get_random_rival_color())  # Random color
     
     def create_beep_sound(self):
         """Create a simple beep sound using numpy and pygame"""
@@ -174,50 +187,75 @@ class SnakeGame:
         self.initialize_level()
     
     def get_rival_direction(self, rival_idx):
-        """AI to move rival snake - dumber version with mistakes"""
+        """AI to move rival snake - avoid boundaries but not too smart about apples"""
         head_x, head_y = self.rival_snakes[rival_idx][0]
         current_dir = self.rival_directions[rival_idx]
         
-        # 40% chance to make a random move (be dumb)
-        if random.random() < 0.4:
-            # Pick a random direction that's not reverse
-            all_dirs = [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT]
-            valid_dirs = []
-            for d in all_dirs:
-                if (current_dir == Direction.UP and d != Direction.DOWN) or \
-                   (current_dir == Direction.DOWN and d != Direction.UP) or \
-                   (current_dir == Direction.LEFT and d != Direction.RIGHT) or \
-                   (current_dir == Direction.RIGHT and d != Direction.LEFT):
-                    valid_dirs.append(d)
-            if valid_dirs:
-                return random.choice(valid_dirs)
+        # Check which directions lead to boundaries (within 3 cells)
+        danger_zone = 3
+        safe_directions = []
+        unsafe_directions = []
         
-        # 60% of the time, try to move toward nearest apple
-        if not self.apples:
-            return current_dir
+        all_dirs = [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT]
         
-        # Find nearest apple
-        nearest_apple = min(self.apples, key=lambda a: abs(head_x - a[0]) + abs(head_y - a[1]))
-        target_x, target_y = nearest_apple
+        for d in all_dirs:
+            # Don't reverse direction
+            if (current_dir == Direction.UP and d == Direction.DOWN) or \
+               (current_dir == Direction.DOWN and d == Direction.UP) or \
+               (current_dir == Direction.LEFT and d == Direction.RIGHT) or \
+               (current_dir == Direction.RIGHT and d == Direction.LEFT):
+                continue
+            
+            # Check if this direction is near a boundary
+            dx, dy = d.value
+            new_x = head_x + dx
+            new_y = head_y + dy
+            
+            is_safe = True
+            if new_x < danger_zone or new_x >= GRID_WIDTH - danger_zone:
+                is_safe = False
+            if new_y < danger_zone or new_y >= GRID_HEIGHT - danger_zone:
+                is_safe = False
+            
+            if is_safe:
+                safe_directions.append(d)
+            else:
+                unsafe_directions.append(d)
         
-        # Sometimes move in the right direction
-        possible_directions = []
+        # 70% of the time, prefer safe directions if available
+        if safe_directions and random.random() < 0.7:
+            return random.choice(safe_directions)
         
-        # Add directions toward target
-        if target_x < head_x and current_dir != Direction.RIGHT:
-            possible_directions.append(Direction.LEFT)
-        if target_x > head_x and current_dir != Direction.LEFT:
-            possible_directions.append(Direction.RIGHT)
-        if target_y < head_y and current_dir != Direction.DOWN:
-            possible_directions.append(Direction.UP)
-        if target_y > head_y and current_dir != Direction.UP:
-            possible_directions.append(Direction.DOWN)
+        # 30% of the time, or if no safe directions, try toward apple (but not too smart)
+        if random.random() < 0.5 and self.apples:  # Only 50% chance to even try for apple
+            # Find nearest apple
+            nearest_apple = min(self.apples, key=lambda a: abs(head_x - a[0]) + abs(head_y - a[1]))
+            target_x, target_y = nearest_apple
+            
+            # Add directions toward target
+            toward_apple = []
+            if target_x < head_x and current_dir != Direction.RIGHT:
+                toward_apple.append(Direction.LEFT)
+            if target_x > head_x and current_dir != Direction.LEFT:
+                toward_apple.append(Direction.RIGHT)
+            if target_y < head_y and current_dir != Direction.DOWN:
+                toward_apple.append(Direction.UP)
+            if target_y > head_y and current_dir != Direction.UP:
+                toward_apple.append(Direction.DOWN)
+            
+            # Prefer directions that are both toward apple and safe
+            good_choices = [d for d in toward_apple if d in safe_directions]
+            if good_choices:
+                return random.choice(good_choices)
+            elif toward_apple:
+                return random.choice(toward_apple)
         
-        # If no good directions, just keep going
-        if not possible_directions:
-            return current_dir
+        # Default: pick any valid direction, preferring safe ones
+        all_valid = safe_directions + unsafe_directions
+        if all_valid:
+            return random.choice(all_valid)
         
-        return random.choice(possible_directions)
+        return current_dir
     
     def update(self):
         """Update game state"""
@@ -353,6 +391,7 @@ class SnakeGame:
             del self.rival_snakes[i]
             del self.rival_directions[i]
             del self.rival_apples_eaten[i]
+            del self.rival_colors[i]
     
     def draw(self):
         """Draw game screen"""
@@ -372,13 +411,14 @@ class SnakeGame:
             else:  # Body
                 pygame.draw.rect(self.screen, WHITE, rect)
         
-        # Draw all rival snakes (blue head, light gray body)
-        for rival in self.rival_snakes:
+        # Draw all rival snakes with random colors
+        for rival_idx, rival in enumerate(self.rival_snakes):
+            rival_color = self.rival_colors[rival_idx] if rival_idx < len(self.rival_colors) else BLUE
             for i, (x, y) in enumerate(rival):
                 rect = pygame.Rect(x * GRID_SIZE, y * GRID_SIZE, GRID_SIZE - 2, GRID_SIZE - 2)
-                if i == 0:  # Head
-                    pygame.draw.rect(self.screen, BLUE, rect)
-                else:  # Body
+                if i == 0:  # Head - use rival's color
+                    pygame.draw.rect(self.screen, rival_color, rect)
+                else:  # Body - lighter version
                     pygame.draw.rect(self.screen, LIGHT_GRAY, rect)
         
         # Draw all apples
