@@ -76,14 +76,14 @@ class SnakeGame:
         
     def initialize_level(self):
         """Initialize apples and rivals based on current level"""
-        # Level N: N apples, N-1 rivals (min 0 rivals)
-        num_apples = self.level
+        # Level N: 4N apples, N-1 rivals (min 0 rivals)
+        num_apples = self.level * 4
         num_rivals = max(0, self.level - 1)
         
         # Create apples
         self.apples = []
         for _ in range(num_apples):
-            self.apples.append(self.spawn_apple())
+            self.apples.append(self.spawn_apple(RED))
         
         # Create rival snakes
         self.rival_snakes = []
@@ -120,8 +120,47 @@ class SnakeGame:
             # Fallback: no sound if numpy not available
             self.beep_sound = None
     
-    def spawn_apple(self):
+    def get_safe_respawn_position(self, preferred_pos):
+        """Find a safe respawn position, starting with preferred position, then searching randomly"""
+        # Check if preferred position is safe
+        if self._is_position_safe(preferred_pos):
+            return preferred_pos
+        
+        # If not, search for a safe random position
+        max_attempts = 100
+        for _ in range(max_attempts):
+            x = random.randint(0, GRID_WIDTH - 1)
+            y = random.randint(0, GRID_HEIGHT - 1)
+            pos = (x, y)
+            if self._is_position_safe(pos):
+                return pos
+        
+        # If no safe position found after attempts, return preferred anyway
+        return preferred_pos
+    
+    def _is_position_safe(self, pos):
+        """Check if a position is safe (not occupied by any snake or apple)"""
+        # Check player snake
+        if pos in self.snake:
+            return False
+        
+        # Check all rival snakes
+        for rival in self.rival_snakes:
+            if pos in rival:
+                return False
+        
+        # Check all apples
+        apple_positions = [apple['pos'] if isinstance(apple, dict) else apple for apple in self.apples]
+        if pos in apple_positions:
+            return False
+        
+        return True
+    
+    def spawn_apple(self, color=None):
         """Spawn apple at random location not occupied by any snake or apple"""
+        if color is None:
+            color = RED
+        
         while True:
             x = random.randint(0, GRID_WIDTH - 1)
             y = random.randint(0, GRID_HEIGHT - 1)
@@ -143,10 +182,12 @@ class SnakeGame:
                 continue
             
             # Check all existing apples
-            if hasattr(self, 'apples') and pos in self.apples:
-                continue
+            if hasattr(self, 'apples'):
+                apple_positions = [apple['pos'] if isinstance(apple, dict) else apple for apple in self.apples]
+                if pos in apple_positions:
+                    continue
             
-            return pos
+            return {'pos': pos, 'color': color}
     
     def handle_input(self):
         """Handle keyboard input"""
@@ -229,8 +270,8 @@ class SnakeGame:
         # 30% of the time, or if no safe directions, try toward apple (but not too smart)
         if random.random() < 0.5 and self.apples:  # Only 50% chance to even try for apple
             # Find nearest apple
-            nearest_apple = min(self.apples, key=lambda a: abs(head_x - a[0]) + abs(head_y - a[1]))
-            target_x, target_y = nearest_apple
+            nearest_apple = min(self.apples, key=lambda a: abs(head_x - a['pos'][0]) + abs(head_y - a['pos'][1]))
+            target_x, target_y = nearest_apple['pos']
             
             # Add directions toward target
             toward_apple = []
@@ -273,26 +314,53 @@ class SnakeGame:
         # Check player wall collision
         if new_head[0] < 0 or new_head[0] >= GRID_WIDTH or \
            new_head[1] < 0 or new_head[1] >= GRID_HEIGHT:
-            self.game_over = True
-            self.player_won = False
+            # Respawn at size 1 at starting position
+            death_pos = self.snake[0]
+            self.apples.append({'pos': death_pos, 'color': GREEN})
+            respawn_pos = self.get_safe_respawn_position((GRID_WIDTH // 3, GRID_HEIGHT // 2))
+            self.snake = [respawn_pos]
+            self.apples_eaten_this_level = 0  # Reset score
             return
         
         # Check player self collision
         if new_head in self.snake:
-            self.game_over = True
-            self.player_won = False
+            # Respawn at size 1
+            death_pos = self.snake[0]
+            self.apples.append({'pos': death_pos, 'color': GREEN})
+            respawn_pos = self.get_safe_respawn_position((GRID_WIDTH // 3, GRID_HEIGHT // 2))
+            self.snake = [respawn_pos]
+            self.apples_eaten_this_level = 0  # Reset score
             return
         
         # Check if player hits any rival snake
-        for rival in self.rival_snakes:
+        for i, rival in enumerate(self.rival_snakes):
             if new_head in rival:
-                self.game_over = True
-                self.player_won = False
+                player_size = len(self.snake)
+                rival_size = len(rival)
+                
+                if player_size > rival_size:
+                    # Player is larger - rival respawns
+                    rival_death_pos = rival[0]
+                    rival_color = self.rival_colors[i]
+                    self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                    start_x = GRID_WIDTH // 2 + (i + 1) * (GRID_WIDTH // (len(self.rival_snakes) + 2))
+                    start_y = GRID_HEIGHT // 2 + (i % 3 - 1) * 5
+                    respawn_pos = self.get_safe_respawn_position((start_x % GRID_WIDTH, start_y % GRID_HEIGHT))
+                    self.rival_snakes[i] = [respawn_pos]
+                    self.rival_apples_eaten[i] = 0  # Reset rival score
+                else:
+                    # Rival is larger or equal - player respawns
+                    player_death_pos = self.snake[0]
+                    self.apples.append({'pos': player_death_pos, 'color': GREEN})
+                    respawn_pos = self.get_safe_respawn_position((GRID_WIDTH // 3, GRID_HEIGHT // 2))
+                    self.snake = [respawn_pos]
+                    self.apples_eaten_this_level = 0  # Reset player score
                 return
         
         # Update all rival snakes
         new_rival_heads = []
         rivals_to_remove = []
+        rivals_to_respawn = []  # Track rivals that need to respawn
         
         for i, rival in enumerate(self.rival_snakes):
             # Update rival direction
@@ -304,34 +372,84 @@ class SnakeGame:
             new_rival_head = (rival_head_x + rival_dx, rival_head_y + rival_dy)
             new_rival_heads.append(new_rival_head)
             
-            # Check rival wall collision
+            # Check rival wall collision - respawn instead of removing
             if new_rival_head[0] < 0 or new_rival_head[0] >= GRID_WIDTH or \
                new_rival_head[1] < 0 or new_rival_head[1] >= GRID_HEIGHT:
+                rival_color = self.rival_colors[i]
+                rival_death_pos = rival[0]
+                self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                rivals_to_respawn.append(i)
                 rivals_to_remove.append(i)
                 continue
             
-            # Check rival self collision
+            # Check rival self collision - respawn instead of removing
             if new_rival_head in rival:
+                rival_color = self.rival_colors[i]
+                rival_death_pos = rival[0]
+                self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                rivals_to_respawn.append(i)
                 rivals_to_remove.append(i)
                 continue
             
             # Check if rival hits player snake
             if new_rival_head in self.snake:
-                rivals_to_remove.append(i)
-                continue
+                rival_size = len(rival)
+                player_size = len(self.snake)
+                
+                if rival_size > player_size:
+                    # Rival is larger - player dies
+                    rivals_to_remove.append(i)
+                    continue
+                else:
+                    # Player is larger or equal - rival respawns
+                    rival_color = self.rival_colors[i]
+                    rival_death_pos = rival[0]
+                    self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                    rivals_to_respawn.append(i)
+                    rivals_to_remove.append(i)
+                    continue
             
             # Check if rival hits another rival
             for j, other_rival in enumerate(self.rival_snakes):
                 if i != j and new_rival_head in other_rival:
-                    rivals_to_remove.append(i)
+                    rival_i_size = len(rival)
+                    rival_j_size = len(other_rival)
+                    
+                    if rival_i_size > rival_j_size:
+                        # Current rival is larger, other rival respawns
+                        if j not in rivals_to_remove:
+                            other_rival_color = self.rival_colors[j]
+                            other_rival_death_pos = other_rival[0]
+                            self.apples.append({'pos': other_rival_death_pos, 'color': other_rival_color})
+                            rivals_to_respawn.append(j)
+                            rivals_to_remove.append(j)
+                    else:
+                        # Other rival is larger or equal, current rival respawns
+                        rival_color = self.rival_colors[i]
+                        rival_death_pos = rival[0]
+                        self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                        rivals_to_respawn.append(i)
+                        rivals_to_remove.append(i)
                     break
         
         # Check head-to-head collision with player
         for i, new_rival_head in enumerate(new_rival_heads):
             if i not in rivals_to_remove and new_rival_head == new_head:
-                self.game_over = True
-                self.player_won = False
-                return
+                rival_size = len(self.rival_snakes[i])
+                player_size = len(self.snake)
+                
+                if rival_size > player_size:
+                    # Rival is larger - player dies
+                    self.game_over = True
+                    self.player_won = False
+                    return
+                else:
+                    # Player is larger - rival respawns
+                    rival_color = self.rival_colors[i]
+                    rival_death_pos = self.rival_snakes[i][0]
+                    self.apples.append({'pos': rival_death_pos, 'color': rival_color})
+                    rivals_to_respawn.append(i)
+                    rivals_to_remove.append(i)
         
         # Add new player head
         self.snake.insert(0, new_head)
@@ -339,10 +457,11 @@ class SnakeGame:
         # Check if player ate apple
         player_ate = False
         for i, apple in enumerate(self.apples):
-            if new_head == apple:
+            apple_pos = apple['pos'] if isinstance(apple, dict) else apple
+            if new_head == apple_pos:
                 self.score += 10
                 self.apples_eaten_this_level += 1
-                self.apples[i] = self.spawn_apple()
+                self.apples[i] = self.spawn_apple(RED)
                 player_ate = True
                 
                 # Play beep sound
@@ -370,9 +489,10 @@ class SnakeGame:
             # Check if rival ate apple
             rival_ate = False
             for j, apple in enumerate(self.apples):
-                if new_rival_heads[i] == apple:
+                apple_pos = apple['pos'] if isinstance(apple, dict) else apple
+                if new_rival_heads[i] == apple_pos:
                     self.rival_apples_eaten[i] += 1
-                    self.apples[j] = self.spawn_apple()
+                    self.apples[j] = self.spawn_apple(RED)
                     rival_ate = True
                     
                     # Check if any rival won
@@ -386,8 +506,17 @@ class SnakeGame:
                 # Remove tail if didn't eat apple
                 rival.pop()
         
-        # Remove dead rivals
-        for i in sorted(rivals_to_remove, reverse=True):
+        # Respawn rivals that died
+        for i in rivals_to_respawn:
+            start_x = GRID_WIDTH // 2 + (i + 1) * (GRID_WIDTH // (len(self.rival_snakes) + 2))
+            start_y = GRID_HEIGHT // 2 + (i % 3 - 1) * 5
+            respawn_pos = self.get_safe_respawn_position((start_x % GRID_WIDTH, start_y % GRID_HEIGHT))
+            self.rival_snakes[i] = [respawn_pos]
+            self.rival_apples_eaten[i] = 0
+        
+        # Remove any rivals that were marked for removal but didn't respawn
+        truly_removed = [i for i in rivals_to_remove if i not in rivals_to_respawn]
+        for i in sorted(truly_removed, reverse=True):
             del self.rival_snakes[i]
             del self.rival_directions[i]
             del self.rival_apples_eaten[i]
@@ -423,10 +552,17 @@ class SnakeGame:
         
         # Draw all apples
         for apple in self.apples:
-            apple_x, apple_y = apple
+            if isinstance(apple, dict):
+                apple_pos = apple['pos']
+                apple_color = apple['color']
+            else:
+                apple_pos = apple
+                apple_color = RED
+            
+            apple_x, apple_y = apple_pos
             apple_rect = pygame.Rect(apple_x * GRID_SIZE + 2, apple_y * GRID_SIZE + 2, 
                                       GRID_SIZE - 4, GRID_SIZE - 4)
-            pygame.draw.rect(self.screen, RED, apple_rect)
+            pygame.draw.rect(self.screen, apple_color, apple_rect)
         
         # Draw score
         score_text = self.font.render(f"Score: {self.score}", True, WHITE)
