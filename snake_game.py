@@ -228,12 +228,18 @@ class SnakeGame:
         self.initialize_level()
     
     def get_rival_direction(self, rival_idx):
-        """AI to move rival snake - avoid boundaries but not too smart about apples"""
+        """AI to move rival snake - gets smarter at higher levels"""
         head_x, head_y = self.rival_snakes[rival_idx][0]
         current_dir = self.rival_directions[rival_idx]
         
-        # Check which directions lead to boundaries (within 3 cells)
-        danger_zone = 3
+        # Difficulty increases with level
+        # Level 1: 10% apple pursuit
+        # Level 5: 33.3% apple pursuit
+        # Level 10: 66.7% apple pursuit
+        apple_pursuit_chance = min(2/3, 0.10 + (self.level - 1) * 0.063)
+        danger_zone = max(1, 3 - (self.level - 1) // 3)
+        
+        # Check which directions lead to boundaries
         safe_directions = []
         unsafe_directions = []
         
@@ -263,12 +269,8 @@ class SnakeGame:
             else:
                 unsafe_directions.append(d)
         
-        # 70% of the time, prefer safe directions if available
-        if safe_directions and random.random() < 0.7:
-            return random.choice(safe_directions)
-        
-        # 30% of the time, or if no safe directions, try toward apple (but not too smart)
-        if random.random() < 0.5 and self.apples:  # Only 50% chance to even try for apple
+        # Try to pursue apple with level-dependent probability
+        if random.random() < apple_pursuit_chance and self.apples:
             # Find nearest apple
             nearest_apple = min(self.apples, key=lambda a: abs(head_x - a['pos'][0]) + abs(head_y - a['pos'][1]))
             target_x, target_y = nearest_apple['pos']
@@ -284,14 +286,23 @@ class SnakeGame:
             if target_y > head_y and current_dir != Direction.UP:
                 toward_apple.append(Direction.DOWN)
             
-            # Prefer directions that are both toward apple and safe
+            # At higher levels, prefer unsafe directions if they lead to apple
             good_choices = [d for d in toward_apple if d in safe_directions]
             if good_choices:
                 return random.choice(good_choices)
             elif toward_apple:
-                return random.choice(toward_apple)
+                # At level 5+, prefer toward_apple even if unsafe
+                if self.level >= 5:
+                    return random.choice(toward_apple)
+                # Otherwise only pick unsafe if no safe directions exist
+                elif not safe_directions:
+                    return random.choice(toward_apple)
         
-        # Default: pick any valid direction, preferring safe ones
+        # Prefer safe directions, but at high levels be more aggressive
+        if safe_directions and (self.level < 8 or random.random() < 0.7):
+            return random.choice(safe_directions)
+        
+        # Default: pick any valid direction
         all_valid = safe_directions + unsafe_directions
         if all_valid:
             return random.choice(all_valid)
