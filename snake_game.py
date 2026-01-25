@@ -76,9 +76,9 @@ class SnakeGame:
         
     def initialize_level(self):
         """Initialize apples and rivals based on current level"""
-        # Level N: 4N apples, N-1 rivals (min 0 rivals)
+        # Level N: 4N apples, 2N rivals
         num_apples = self.level * 4
-        num_rivals = max(0, self.level - 1)
+        num_rivals = self.level * 2
         
         # Create apples
         self.apples = []
