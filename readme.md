@@ -20,3 +20,6 @@ eat apples(red block) to grow
 if you hit anything not smaller than your size, you will die and become an apple of your color
 
 rival snakes will try eat apples and make it competitive for you as level increases
+
+#Have fun creating
+![download](https://github.com/user-attachments/assets/296338ae-379a-4123-a828-2895ddc19c6b)
