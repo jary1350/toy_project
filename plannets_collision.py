@@ -8,7 +8,7 @@ pygame.init()
 pygame.mixer.init()
 
 # Screen dimensions
-WIDTH, HEIGHT = 800, 600
+WIDTH, HEIGHT = 1800, 1600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Solar System Eating Game - Player Controls Earth!")
 
@@ -47,6 +47,18 @@ PLANETS_DATA = [
     ("Neptune", 20, BLUE)
 ]
 
+# Planet mood map for facial expressions
+PLANET_MOODS = {
+    "Mercury": "worried",
+    "Venus": "happy",
+    "Earth": "happy",
+    "Mars": "sad",
+    "Jupiter": "sleepy",
+    "Saturn": "worried",
+    "Uranus": "sleepy",
+    "Neptune": "sad",
+}
+
 # Asteroid properties
 NUM_ASTEROIDS = 50
 ASTEROID_RADIUS = 3
@@ -61,6 +73,10 @@ FLARE_SPEED = 4
 # Game level
 LEVEL = 1
 FLARE_FREQUENCY_MULTIPLIER = 1.0
+
+# Wormhole properties
+WORMHOLE_RADIUS = 45
+WORMHOLE_COOLDOWN_FRAMES = 60
 
 
 def create_body(name, radius, color, is_asteroid=False):
@@ -90,6 +106,12 @@ for _ in range(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1)))):
 
 # Flares list
 flares = []
+
+# Two connected wormhole portals
+wormholes = [
+    {"pos": [200, 200],             "color": (160, 0, 255),  "angle": 0.0},
+    {"pos": [WIDTH - 200, HEIGHT - 200], "color": (0, 220, 255), "angle": 0.0},
+]
 
 
 def check_collision(body1, body2):
@@ -127,6 +149,119 @@ def create_beep_sound(frequency, duration_ms, sample_rate=22050):
 # Create sound effects
 flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
+
+
+def draw_planet_face(surface, body):
+    """Draw a mood-based face for a planet (happy, sad, worried, sleepy)."""
+    x, y = int(body["pos"][0]), int(body["pos"][1])
+    r = body["radius"]
+    if r < 8:
+        return
+
+    mood = PLANET_MOODS.get(body["name"], "happy")
+    eye_ox = max(2, r // 3)
+    eye_oy = max(2, r // 4)
+    eye_r  = max(2, r // 5)
+    pup_r  = max(1, eye_r // 2)
+    lx, ly = x - eye_ox, y - eye_oy
+    rx, ry = x + eye_ox, y - eye_oy
+
+    # Base eye whites
+    pygame.draw.circle(surface, (255, 255, 220), (lx, ly), eye_r)
+    pygame.draw.circle(surface, (255, 255, 220), (rx, ry), eye_r)
+
+    if mood == "sleepy":
+        lid_color = (25, 20, 20)
+        pygame.draw.line(surface, lid_color, (lx - eye_r, ly), (lx + eye_r, ly), max(1, r // 8))
+        pygame.draw.line(surface, lid_color, (rx - eye_r, ry), (rx + eye_r, ry), max(1, r // 8))
+    elif mood == "worried":
+        pygame.draw.circle(surface, (15, 10, 10), (lx, ly + pup_r // 2), pup_r)
+        pygame.draw.circle(surface, (15, 10, 10), (rx, ry + pup_r // 2), pup_r)
+        brow_w = max(1, r // 9)
+        pygame.draw.line(surface, (15, 10, 10), (lx - eye_r, ly - eye_r - 2), (lx + eye_r, ly - eye_r), brow_w)
+        pygame.draw.line(surface, (15, 10, 10), (rx - eye_r, ry - eye_r), (rx + eye_r, ry - eye_r - 2), brow_w)
+    else:
+        pygame.draw.circle(surface, (15, 10, 10), (lx, ly), pup_r)
+        pygame.draw.circle(surface, (15, 10, 10), (rx, ry), pup_r)
+
+    mouth_w = max(r // 2, 10)
+    mouth_h = max(r // 3, 6)
+    mouth_rect = pygame.Rect(x - mouth_w // 2, y + r // 8, mouth_w, mouth_h)
+    mouth_color = (15, 10, 10)
+    mouth_thickness = max(1, r // 8)
+
+    if mood == "happy":
+        pygame.draw.arc(surface, mouth_color, mouth_rect, math.pi, 2 * math.pi, mouth_thickness)
+    elif mood == "sad":
+        sad_rect = pygame.Rect(x - mouth_w // 2, y + r // 4, mouth_w, mouth_h)
+        pygame.draw.arc(surface, mouth_color, sad_rect, 0, math.pi, mouth_thickness)
+    elif mood == "worried":
+        wav_y = y + r // 3
+        pygame.draw.line(surface, mouth_color, (x - mouth_w // 2, wav_y), (x - mouth_w // 6, wav_y + 2), mouth_thickness)
+        pygame.draw.line(surface, mouth_color, (x - mouth_w // 6, wav_y + 2), (x + mouth_w // 6, wav_y - 2), mouth_thickness)
+        pygame.draw.line(surface, mouth_color, (x + mouth_w // 6, wav_y - 2), (x + mouth_w // 2, wav_y), mouth_thickness)
+    elif mood == "sleepy":
+        pygame.draw.line(surface, mouth_color, (x - mouth_w // 3, y + r // 3), (x + mouth_w // 3, y + r // 3), mouth_thickness)
+
+
+def draw_sun_face(surface, is_angry):
+    """Draw sleepy or angry expression for the sun based on flare activity."""
+    x, y = SUN_POS
+    r = SUN_RADIUS
+    eye_ox = r // 3
+    eye_oy = r // 4
+    eye_r = max(3, r // 10)
+    face_color = (60, 30, 10)
+    mouth_thickness = max(2, r // 14)
+
+    if is_angry:
+        # Angry eyes and frown when the sun is actively firing flares.
+        pygame.draw.circle(surface, (255, 240, 200), (x - eye_ox, y - eye_oy), eye_r)
+        pygame.draw.circle(surface, (255, 240, 200), (x + eye_ox, y - eye_oy), eye_r)
+        pygame.draw.circle(surface, face_color, (x - eye_ox + eye_r // 2, y - eye_oy), eye_r // 2)
+        pygame.draw.circle(surface, face_color, (x + eye_ox - eye_r // 2, y - eye_oy), eye_r // 2)
+        brow_w = max(2, r // 16)
+        pygame.draw.line(surface, face_color, (x - eye_ox - eye_r, y - eye_oy - eye_r), (x - eye_ox + eye_r, y - eye_oy - 1), brow_w)
+        pygame.draw.line(surface, face_color, (x + eye_ox - eye_r, y - eye_oy - 1), (x + eye_ox + eye_r, y - eye_oy - eye_r), brow_w)
+        angry_mouth = pygame.Rect(x - r // 3, y + r // 5, (2 * r) // 3, r // 4)
+        pygame.draw.arc(surface, face_color, angry_mouth, 0, math.pi, mouth_thickness)
+    else:
+        # Sleepy closed eyes and small relaxed mouth when calm.
+        lid_w = max(2, r // 12)
+        pygame.draw.line(surface, face_color, (x - eye_ox - eye_r, y - eye_oy), (x - eye_ox + eye_r, y - eye_oy), lid_w)
+        pygame.draw.line(surface, face_color, (x + eye_ox - eye_r, y - eye_oy), (x + eye_ox + eye_r, y - eye_oy), lid_w)
+        pygame.draw.arc(surface, face_color, pygame.Rect(x - r // 5, y + r // 6, (2 * r) // 5, r // 5), math.pi, 2 * math.pi, mouth_thickness)
+
+
+def draw_wormhole(surface, wh):
+    """Draw an animated spinning wormhole portal."""
+    x, y  = int(wh["pos"][0]), int(wh["pos"][1])
+    r     = WORMHOLE_RADIUS
+    color = wh["color"]
+    angle = wh["angle"]
+
+    # Dark void centre
+    pygame.draw.circle(surface, (5, 0, 18), (x, y), r - 4)
+
+    # Spinning spiral arms
+    num_arms = 6
+    for i in range(num_arms):
+        a     = angle + i * (2 * math.pi / num_arms)
+        mid_x = x + int((r // 2) * math.cos(a + 0.5))
+        mid_y = y + int((r // 2) * math.sin(a + 0.5))
+        end_x = x + int((r - 4)  * math.cos(a))
+        end_y = y + int((r - 4)  * math.sin(a))
+        pygame.draw.line(surface, color, (x, y), (mid_x, mid_y), 2)
+        pygame.draw.line(surface, color, (mid_x, mid_y), (end_x, end_y), 1)
+
+    # Outer glowing rings
+    pygame.draw.circle(surface, color, (x, y), r, 3)
+    pygame.draw.circle(surface, (220, 220, 255), (x, y), r + 3, 1)
+
+    # Inner pulsing ring
+    pulse_r = r - 10 + int(5 * math.sin(angle * 3))
+    if pulse_r > 2:
+        pygame.draw.circle(surface, color, (x, y), pulse_r, 1)
 
 
 # Main game loop
@@ -229,6 +364,24 @@ while running:
         if dist_sq < sum_r * sum_r:
             body["active"] = False
 
+    # Wormhole teleportation
+    for body in bodies:
+        if not body["active"]:
+            continue
+        cooldown = body.get("wh_cooldown", 0)
+        if cooldown > 0:
+            body["wh_cooldown"] = cooldown - 1
+            continue
+        for idx, wh in enumerate(wormholes):
+            dx = body["pos"][0] - wh["pos"][0]
+            dy = body["pos"][1] - wh["pos"][1]
+            if math.hypot(dx, dy) < WORMHOLE_RADIUS:
+                other = wormholes[1 - idx]
+                body["pos"][0] = float(other["pos"][0])
+                body["pos"][1] = float(other["pos"][1])
+                body["wh_cooldown"] = WORMHOLE_COOLDOWN_FRAMES
+                break
+
     # Update flares
     for flare in flares[:]:
         flare["pos"][0] += flare["vel"][0]
@@ -288,9 +441,19 @@ while running:
         # Earth destroyed - Game Over
         game_over = True
 
+    # Update wormhole animation
+    for wh in wormholes:
+        wh["angle"] = (wh["angle"] + 0.05) % (2 * math.pi)
+
+    # Draw wormholes (behind everything else)
+    for wh in wormholes:
+        draw_wormhole(screen, wh)
+
     # Draw Sun with glow
     pygame.draw.circle(screen, SUN_COLOR, SUN_POS, SUN_RADIUS)
     pygame.draw.circle(screen, GLOW_COLOR, SUN_POS, SUN_RADIUS + 15, 15)
+    flare_near_sun = any(math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS for f in flares)
+    draw_sun_face(screen, is_angry=flare_near_sun)
 
     # Draw active bodies
     active_bodies = [b for b in bodies if b["active"]]  # Refresh after collisions
@@ -307,6 +470,10 @@ while running:
         if body["name"] == "Uranus":
             for r in range(body["radius"] + 6, body["radius"] + 18, 4):
                 pygame.draw.circle(screen, URANUS_RING_COLOR, (x, y), r, 1)
+
+        # Mood face on planets (skip tiny asteroids)
+        if body["name"] != "Asteroid":
+            draw_planet_face(screen, body)
 
     # Draw flares
     for flare in flares:
