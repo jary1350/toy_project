@@ -61,6 +61,7 @@ PLANET_MOODS = {
 
 # Asteroid properties
 NUM_ASTEROIDS = 50
+MAX_ASTEROIDS = 1000
 ASTEROID_RADIUS = 3
 ASTEROID_COLOR = (150, 150, 150)
 
@@ -101,7 +102,8 @@ def create_body(name, radius, color, is_asteroid=False):
 
 # Create planets and asteroids
 bodies = [create_body(name, radius, color) for name, radius, color in PLANETS_DATA]
-for _ in range(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1)))):
+num_asteroids = min(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1))), MAX_ASTEROIDS)
+for _ in range(num_asteroids):
     bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
 
 # Flares list
@@ -287,7 +289,8 @@ while running:
                     # Reset bodies with new counts
                     bodies.clear()
                     bodies.extend([create_body(name, radius, color) for name, radius, color in PLANETS_DATA])
-                    for _ in range(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1)))):
+                    num_asteroids = min(int(NUM_ASTEROIDS * (1.5 ** (LEVEL - 1))), MAX_ASTEROIDS)
+                    for _ in range(num_asteroids):
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
                 elif game_over:
@@ -299,7 +302,8 @@ while running:
                     # Reset bodies
                     bodies.clear()
                     bodies.extend([create_body(name, radius, color) for name, radius, color in PLANETS_DATA])
-                    for _ in range(NUM_ASTEROIDS):
+                    num_asteroids = min(NUM_ASTEROIDS, MAX_ASTEROIDS)
+                    for _ in range(num_asteroids):
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
 
