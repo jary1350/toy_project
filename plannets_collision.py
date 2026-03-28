@@ -16,6 +16,8 @@ pygame.display.set_caption("Solar System Eating Game - Player Controls Earth!")
 BLACK = (0, 0, 0)
 SUN_COLOR = (255, 200, 80)
 GLOW_COLOR = (255, 230, 150, 80)  # Semi-transparent glow
+SUN_IMPACT_COLOR = (255, 135, 25)
+SUN_IMPACT_GLOW_COLOR = (255, 175, 70, 110)
 SATURN_COLOR = (180, 140, 60)  # Yellowish-brown
 RING_COLOR = (220, 200, 180)  # Saturn rings
 URANUS_RING_COLOR = (180, 220, 255)  # Uranus rings
@@ -71,14 +73,24 @@ FLARE_RADIUS = 5
 FLARE_COLOR = (255, 100, 0)  # Orange fireball
 FLARE_SPAWN_CHANCE = 0.02  # 2% chance per frame
 FLARE_SPEED = 4
+SUN_IMPACT_FLARE_MULTIPLIER = 3.8
+SUN_IMPACT_BOOST_SECONDS = 5
+GAME_FPS = 60
+SUN_IMPACT_BOOST_FRAMES = SUN_IMPACT_BOOST_SECONDS * GAME_FPS
 
 # Sun impact splash properties
-IMPACT_SPLASH_MIN = 18
-IMPACT_SPLASH_MAX = 34
-IMPACT_SPLASH_SPEED_MIN = 3.5
-IMPACT_SPLASH_SPEED_MAX = 9.0
-IMPACT_SPLASH_LIFETIME_MIN = 14
-IMPACT_SPLASH_LIFETIME_MAX = 30
+IMPACT_SPLASH_MIN = 44
+IMPACT_SPLASH_MAX = 82
+IMPACT_SPLASH_SPEED_MIN = 5.5
+IMPACT_SPLASH_SPEED_MAX = 13.0
+IMPACT_SPLASH_LIFETIME_MIN = 22
+IMPACT_SPLASH_LIFETIME_MAX = 48
+IMPACT_DEBRIS_MIN = 28
+IMPACT_DEBRIS_MAX = 56
+IMPACT_DEBRIS_SPEED_MIN = 2.5
+IMPACT_DEBRIS_SPEED_MAX = 7.5
+IMPACT_DEBRIS_LIFETIME_MIN = 30
+IMPACT_DEBRIS_LIFETIME_MAX = 64
 
 # Game level
 LEVEL = 1
@@ -173,22 +185,42 @@ def create_sharp_explosion_sound(duration_ms=140, sample_rate=22050):
 
 
 def spawn_sun_impact_splash(impact_pos, normal_vec):
-    """Spawn bright flare fragments that splash outward from a sun impact."""
+    """Spawn violent plasma jets and heavier debris from a sun impact."""
     splashes = []
     base_angle = math.atan2(normal_vec[1], normal_vec[0])
-    count = random.randint(IMPACT_SPLASH_MIN, IMPACT_SPLASH_MAX)
 
-    for _ in range(count):
-        spread = random.uniform(-1.05, 1.05)
+    plasma_count = random.randint(IMPACT_SPLASH_MIN, IMPACT_SPLASH_MAX)
+    for _ in range(plasma_count):
+        spread = random.uniform(-1.35, 1.35)
         angle = base_angle + spread
         speed = random.uniform(IMPACT_SPLASH_SPEED_MIN, IMPACT_SPLASH_SPEED_MAX)
         life = random.randint(IMPACT_SPLASH_LIFETIME_MIN, IMPACT_SPLASH_LIFETIME_MAX)
         splashes.append({
             "pos": [impact_pos[0], impact_pos[1]],
             "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
-            "radius": random.randint(2, 5),
+            "radius": random.randint(2, 6),
             "lifetime": life,
             "max_life": life,
+            "drag": random.uniform(0.92, 0.97),
+            "kind": "plasma",
+            "base_color": (255, random.randint(120, 220), random.randint(40, 115)),
+        })
+
+    debris_count = random.randint(IMPACT_DEBRIS_MIN, IMPACT_DEBRIS_MAX)
+    for _ in range(debris_count):
+        spread = random.uniform(-1.8, 1.8)
+        angle = base_angle + spread
+        speed = random.uniform(IMPACT_DEBRIS_SPEED_MIN, IMPACT_DEBRIS_SPEED_MAX)
+        life = random.randint(IMPACT_DEBRIS_LIFETIME_MIN, IMPACT_DEBRIS_LIFETIME_MAX)
+        splashes.append({
+            "pos": [impact_pos[0], impact_pos[1]],
+            "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+            "radius": random.randint(1, 4),
+            "lifetime": life,
+            "max_life": life,
+            "drag": random.uniform(0.90, 0.95),
+            "kind": "debris",
+            "base_color": (255, random.randint(70, 140), random.randint(15, 45)),
         })
 
     return splashes
@@ -201,6 +233,7 @@ sun_impact_explosion_sound = create_sharp_explosion_sound()
 
 # Sun impact splashes list
 sun_impact_splashes = []
+sun_impact_boost_timer = 0
 
 
 def draw_planet_face(surface, body):
@@ -399,6 +432,7 @@ while running:
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
                     sun_impact_splashes.clear()
+                    sun_impact_boost_timer = 0
                 elif game_over:
                     # Restart from level 1
                     LEVEL = 1
@@ -413,14 +447,20 @@ while running:
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
                     sun_impact_splashes.clear()
+                    sun_impact_boost_timer = 0
 
     screen.fill(BLACK)
 
     keys = pygame.key.get_pressed()
 
+    if sun_impact_boost_timer > 0:
+        sun_impact_boost_timer -= 1
+
     # Spawn flares randomly with level-based frequency
     if not level_passed and not game_over:
         spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
+        if sun_impact_boost_timer > 0:
+            spawn_chance *= SUN_IMPACT_FLARE_MULTIPLIER
         if random.random() < spawn_chance:
             flares.append(spawn_flare())
 
@@ -508,6 +548,7 @@ while running:
                 impact_pos = [SUN_POS[0] + nx * SUN_RADIUS, SUN_POS[1] + ny * SUN_RADIUS]
                 sun_impact_splashes.extend(spawn_sun_impact_splash(impact_pos, (nx, ny)))
                 sun_impact_explosion_sound.play()
+                sun_impact_boost_timer = SUN_IMPACT_BOOST_FRAMES
             body["active"] = False
 
     # Wormhole teleportation
@@ -544,8 +585,8 @@ while running:
     for particle in sun_impact_splashes[:]:
         particle["pos"][0] += particle["vel"][0]
         particle["pos"][1] += particle["vel"][1]
-        particle["vel"][0] *= 0.95
-        particle["vel"][1] *= 0.95
+        particle["vel"][0] *= particle.get("drag", 0.95)
+        particle["vel"][1] *= particle.get("drag", 0.95)
         particle["lifetime"] -= 1
 
         if particle["lifetime"] <= 0:
@@ -607,8 +648,11 @@ while running:
         draw_wormhole(screen, wh)
 
     # Draw Sun with glow
-    pygame.draw.circle(screen, SUN_COLOR, SUN_POS, SUN_RADIUS)
-    pygame.draw.circle(screen, GLOW_COLOR, SUN_POS, SUN_RADIUS + 15, 15)
+    sun_is_orange = sun_impact_boost_timer > 0
+    sun_color = SUN_IMPACT_COLOR if sun_is_orange else SUN_COLOR
+    sun_glow = SUN_IMPACT_GLOW_COLOR if sun_is_orange else GLOW_COLOR
+    pygame.draw.circle(screen, sun_color, SUN_POS, SUN_RADIUS)
+    pygame.draw.circle(screen, sun_glow, SUN_POS, SUN_RADIUS + 15, 15)
     flare_near_sun = any(math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS for f in flares)
     draw_sun_face(screen, is_angry=flare_near_sun)
 
@@ -644,8 +688,16 @@ while running:
         life_ratio = particle["lifetime"] / max(1, particle["max_life"])
         x, y = int(particle["pos"][0]), int(particle["pos"][1])
         r = max(1, int(particle["radius"] * life_ratio + 1))
-        color = (255, int(120 + 120 * life_ratio), int(40 + 60 * life_ratio))
+        base_r, base_g, base_b = particle.get("base_color", (255, 160, 70))
+        brightness = 0.45 + 0.75 * life_ratio
+        color = (
+            min(255, int(base_r * brightness)),
+            min(255, int(base_g * brightness)),
+            min(255, int(base_b * brightness)),
+        )
         pygame.draw.circle(screen, color, (x, y), r)
+        if particle.get("kind") == "plasma" and life_ratio > 0.2:
+            pygame.draw.circle(screen, (255, min(255, color[1] + 35), min(255, color[2] + 20)), (x, y), r + 2, 1)
 
     # Display level
     level_text = font.render(f"Level: {LEVEL}", True, (255, 255, 255))
@@ -673,6 +725,6 @@ while running:
     bodies[:] = [b for b in bodies if b["active"]]
 
     pygame.display.flip()
-    clock.tick(60)
+    clock.tick(GAME_FPS)
 
 pygame.quit()
