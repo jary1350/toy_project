@@ -597,6 +597,75 @@ def draw_planet_face(surface, body):
         pygame.draw.line(surface, mouth_color, (x - mouth_w // 3, y + r // 3), (x + mouth_w // 3, y + r // 3), mouth_thickness)
 
 
+def draw_earth_realistic(surface, body):
+    """Draw Earth with realistic continents and oceans."""
+    x, y = int(body["pos"][0]), int(body["pos"][1])
+    r = body["radius"]
+    
+    if r < 8:
+        return
+    
+    # Ocean base (deep blue)
+    pygame.draw.circle(surface, (25, 80, 180), (x, y), r)
+    
+    # Create a seeded random for consistent continent placement
+    random.seed(42)  # Fixed seed for consistent Earth appearance
+    
+    # Define continent regions as (center_offset_x, center_offset_y, size_factor, color)
+    # Sizes are relative to planet radius
+    continents = [
+        # North America
+        (-0.35, -0.25, 0.5, (34, 139, 34)),  # Forest green
+        # South America
+        (-0.25, 0.3, 0.35, (34, 139, 34)),
+        # Eurasia/Europe
+        (0.15, -0.3, 0.6, (34, 120, 34)),   # Slightly darker green
+        # Africa
+        (0.2, 0.1, 0.45, (107, 142, 35)),   # Olive green
+        # Australia
+        (0.4, 0.25, 0.25, (34, 139, 34)),
+        # Antarctica
+        (0, 0.6, 0.4, (169, 169, 169)),     # Gray (ice)
+        # Greenland
+        (-0.15, -0.5, 0.2, (192, 192, 192)), # Light gray
+    ]
+    
+    # Draw continents with slight variation
+    for cont_x, cont_y, size, color in continents:
+        # Add small random offset for natural look
+        offset_x = cont_x + random.uniform(-0.08, 0.08)
+        offset_y = cont_y + random.uniform(-0.08, 0.08)
+        
+        # Calculate continent center position
+        cent_x = int(x + offset_x * r)
+        cent_y = int(y + offset_y * r)
+        cent_r = int(size * r * random.uniform(0.85, 1.15))
+        
+        # Draw continent as filled circle with some edge variation
+        pygame.draw.circle(surface, color, (cent_x, cent_y), cent_r)
+        
+        # Add ocean color at edges for more realistic coastlines
+        if cent_r > 4:
+            # Subtle glow effect at continent edges
+            pygame.draw.circle(surface, (20, 70, 160), (cent_x, cent_y), cent_r + 1, 1)
+    
+    # Add some cloud/atmospheric effect (white semi-transparent patches)
+    cloud_color = (220, 220, 240, 50)
+    num_clouds = random.randint(2, 4)
+    for _ in range(num_clouds):
+        cloud_x = int(x + random.uniform(-r * 0.8, r * 0.8))
+        cloud_y = int(y + random.uniform(-r * 0.8, r * 0.8))
+        cloud_r = int(r * random.uniform(0.15, 0.35))
+        
+        # Check if cloud is within planet bounds
+        dist_from_center = math.hypot(cloud_x - x, cloud_y - y)
+        if dist_from_center + cloud_r <= r + 2:
+            pygame.draw.circle(surface, (200, 200, 220), (cloud_x, cloud_y), cloud_r // 2)
+    
+    # Restore random seed
+    random.seed()
+
+
 def get_threat_vector(body, active_planets, flares, level):
     """Return normalized vector away from nearest threat and whether a threat is nearby."""
     detect_range = (
@@ -1263,7 +1332,12 @@ while running:
     active_bodies = [b for b in bodies if b["active"]]  # Refresh after collisions
     for body in active_bodies:
         x, y = int(body["pos"][0]), int(body["pos"][1])
-        pygame.draw.circle(screen, body["color"], (x, y), body["radius"])
+        
+        # Draw Earth with realistic continents, or simple circle for other planets
+        if body["name"] == "Earth":
+            draw_earth_realistic(screen, body)
+        else:
+            pygame.draw.circle(screen, body["color"], (x, y), body["radius"])
 
         # Saturn rings
         if body["name"] == "Saturn":
