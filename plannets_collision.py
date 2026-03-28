@@ -23,6 +23,8 @@ SUN_BLUE_GIANT_GLOW_COLOR = (180, 235, 255, 125)
 SUN_WHITE_DWARF_COLOR = (240, 248, 255)
 SUN_WHITE_DWARF_GLOW_COLOR = (215, 235, 255, 130)
 SUN_BLACK_HOLE_GLOW_COLOR = (85, 115, 180, 110)
+GHOST_COLOR = (235, 245, 255)
+GHOST_EYE_COLOR = (25, 30, 45)
 SATURN_COLOR = (180, 140, 60)  # Yellowish-brown
 RING_COLOR = (220, 200, 180)  # Saturn rings
 URANUS_RING_COLOR = (180, 220, 255)  # Uranus rings
@@ -106,6 +108,14 @@ BLACK_FLARE_SPAWN_CHANCE = 0.05
 BLACK_HOLE_PULL_ACCEL = 0.35
 BLACK_HOLE_PULL_SPEED_MIN = 4.5
 BLACK_HOLE_PULL_SPEED_MAX = 14.0
+BLACK_HOLE_GHOST_COUNT = 3
+BLACK_HOLE_GHOST_RADIUS = 18
+BLACK_HOLE_GHOST_SPEED_MIN = 2.1
+BLACK_HOLE_GHOST_SPEED_MAX = 3.8
+BLACK_HOLE_AMBIENCE_INTERVAL = 210
+BLACK_HOLE_GHOST_TRAIL_LENGTH = 9
+BLACK_HOLE_GHOST_ALPHA_MIN = 80
+BLACK_HOLE_GHOST_ALPHA_MAX = 200
 
 # Sun impact splash properties
 IMPACT_SPLASH_MIN = 44
@@ -313,6 +323,24 @@ def spawn_black_flare():
     }
 
 
+def spawn_black_hole_ghosts():
+    ghosts = []
+    for index in range(BLACK_HOLE_GHOST_COUNT):
+        angle = (2 * math.pi * index) / BLACK_HOLE_GHOST_COUNT
+        distance = SUN_RADIUS + 140 + index * 40
+        ghosts.append({
+            "pos": [
+                SUN_POS[0] + math.cos(angle) * distance,
+                SUN_POS[1] + math.sin(angle) * distance,
+            ],
+            "vel": [0.0, 0.0],
+            "speed": random.uniform(BLACK_HOLE_GHOST_SPEED_MIN, BLACK_HOLE_GHOST_SPEED_MAX),
+            "phase": random.uniform(0, 2 * math.pi),
+            "trail": [],
+        })
+    return ghosts
+
+
 def spawn_massive_collapse_wave():
     """Spawn a large radial shock of flares during sun collapse."""
     wave = []
@@ -362,6 +390,36 @@ def create_flare_planet_impact_sound(duration_ms=130, sample_rate=22050):
     tone = np.sin(2.0 * np.pi * 1150.0 * t) + 0.45 * np.sin(2.0 * np.pi * 1950.0 * t)
     noise = np.random.uniform(-1.0, 1.0, frames).astype(np.float32)
     wave = (0.6 * tone + 0.4 * noise) * envelope
+    wave = np.clip(wave, -1.0, 1.0)
+    arr = (wave * 32767).astype(np.int16)
+    arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
+    return pygame.sndarray.make_sound(arr)
+
+
+def create_black_hole_ambience_sound(duration_ms=950, sample_rate=22050):
+    """Create an eerie drifting tone for the black hole stage."""
+    frames = int(duration_ms * sample_rate / 1000)
+    t = np.arange(frames, dtype=np.float32) / sample_rate
+    envelope = np.minimum(1.0, t * 7.0) * np.exp(-1.6 * t)
+    low = np.sin(2.0 * np.pi * (72.0 + 12.0 * np.sin(2.0 * np.pi * 0.7 * t)) * t)
+    high = np.sin(2.0 * np.pi * (410.0 + 55.0 * np.sin(2.0 * np.pi * 0.33 * t)) * t)
+    noise = np.random.uniform(-1.0, 1.0, frames).astype(np.float32)
+    wave = (0.58 * low + 0.22 * high + 0.20 * noise) * envelope
+    wave = np.clip(wave, -1.0, 1.0)
+    arr = (wave * 32767).astype(np.int16)
+    arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
+    return pygame.sndarray.make_sound(arr)
+
+
+def create_ghost_capture_sound(duration_ms=220, sample_rate=22050):
+    """Create a sharp ghostly shriek for captures."""
+    frames = int(duration_ms * sample_rate / 1000)
+    t = np.arange(frames, dtype=np.float32) / sample_rate
+    envelope = np.exp(-9.0 * t)
+    sweep = np.sin(2.0 * np.pi * (880.0 - 430.0 * t) * t)
+    undertone = np.sin(2.0 * np.pi * 180.0 * t)
+    noise = np.random.uniform(-1.0, 1.0, frames).astype(np.float32)
+    wave = (0.56 * sweep + 0.22 * undertone + 0.22 * noise) * envelope
     wave = np.clip(wave, -1.0, 1.0)
     arr = (wave * 32767).astype(np.int16)
     arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
@@ -466,6 +524,8 @@ flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flar
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
 sun_impact_explosion_sound = create_sharp_explosion_sound()
 flare_planet_impact_sound = create_flare_planet_impact_sound()
+black_hole_ambience_sound = create_black_hole_ambience_sound()
+ghost_capture_sound = create_ghost_capture_sound()
 
 # Sun impact splashes list
 sun_impact_splashes = []
@@ -477,6 +537,8 @@ sun_age_frames = 0
 sun_collapsed = False
 white_dwarf_age_frames = 0
 black_hole_active = False
+black_hole_ghosts = []
+black_hole_ambience_timer = 0
 collapse_shockwave = None
 camera_shake_timer = 0
 camera_shake_intensity = 0
@@ -684,6 +746,8 @@ while running:
                     sun_collapsed = False
                     white_dwarf_age_frames = 0
                     black_hole_active = False
+                    black_hole_ghosts.clear()
+                    black_hole_ambience_timer = 0
                     SUN_RADIUS = SUN_BASE_RADIUS
                     collapse_shockwave = None
                     camera_shake_timer = 0
@@ -708,6 +772,8 @@ while running:
                     sun_collapsed = False
                     white_dwarf_age_frames = 0
                     black_hole_active = False
+                    black_hole_ghosts.clear()
+                    black_hole_ambience_timer = 0
                     SUN_RADIUS = SUN_BASE_RADIUS
                     collapse_shockwave = None
                     camera_shake_timer = 0
@@ -738,6 +804,8 @@ while running:
             SUN_RADIUS = max(16, int(SUN_BASE_RADIUS * SUN_WHITE_DWARF_RADIUS_MULT))
             if white_dwarf_age_frames >= WHITE_DWARF_MAX_FRAMES:
                 black_hole_active = True
+                black_hole_ghosts = spawn_black_hole_ghosts()
+                black_hole_ambience_timer = BLACK_HOLE_AMBIENCE_INTERVAL
                 SUN_RADIUS = max(10, int(SUN_BASE_RADIUS * SUN_BLACK_HOLE_RADIUS_MULT))
                 collapse_shockwave = {
                     "radius": SUN_RADIUS + 6,
@@ -747,6 +815,7 @@ while running:
                 }
                 camera_shake_timer = COLLAPSE_SHAKE_FRAMES
                 camera_shake_intensity = COLLAPSE_SHAKE_INTENSITY
+                black_hole_ambience_sound.play()
         else:
             sun_age_frames += 1
             if sun_age_frames >= SUN_AGE_MAX_FRAMES:
@@ -775,6 +844,11 @@ while running:
         if black_hole_active:
             if random.random() < BLACK_FLARE_SPAWN_CHANCE:
                 flares.append(spawn_black_flare())
+            if black_hole_ambience_timer <= 0:
+                black_hole_ambience_sound.play()
+                black_hole_ambience_timer = BLACK_HOLE_AMBIENCE_INTERVAL
+            else:
+                black_hole_ambience_timer -= 1
         else:
             spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
             if sun_impact_boost_timer > 0:
@@ -811,6 +885,52 @@ while running:
             mood = "happy"
 
         body["mood"] = mood
+
+    # Update black hole ghosts and let them hunt planets.
+    if black_hole_active:
+        huntable_planets = [b for b in bodies if b["active"] and b["name"] != "Asteroid" and not b.get("black_hole_pull", False)]
+        for ghost in black_hole_ghosts:
+            ghost["phase"] = (ghost["phase"] + 0.08) % (2 * math.pi)
+            if huntable_planets:
+                target = min(
+                    huntable_planets,
+                    key=lambda body: (ghost["pos"][0] - body["pos"][0]) ** 2 + (ghost["pos"][1] - body["pos"][1]) ** 2,
+                )
+                dx = target["pos"][0] - ghost["pos"][0]
+                dy = target["pos"][1] - ghost["pos"][1]
+                dist = math.hypot(dx, dy)
+                if dist > 0:
+                    wobble_x = math.cos(ghost["phase"]) * 0.65
+                    wobble_y = math.sin(ghost["phase"] * 1.3) * 0.65
+                    ghost["vel"][0] = (dx / dist) * ghost["speed"] + wobble_x
+                    ghost["vel"][1] = (dy / dist) * ghost["speed"] + wobble_y
+            else:
+                orbit_angle = math.atan2(ghost["pos"][1] - SUN_POS[1], ghost["pos"][0] - SUN_POS[0]) + 0.04
+                orbit_radius = max(SUN_RADIUS + 110, math.hypot(ghost["pos"][0] - SUN_POS[0], ghost["pos"][1] - SUN_POS[1]))
+                ghost["pos"][0] = SUN_POS[0] + math.cos(orbit_angle) * orbit_radius
+                ghost["pos"][1] = SUN_POS[1] + math.sin(orbit_angle) * orbit_radius
+                continue
+
+            ghost["pos"][0] += ghost["vel"][0]
+            ghost["pos"][1] += ghost["vel"][1]
+            ghost["trail"].append((ghost["pos"][0], ghost["pos"][1]))
+            if len(ghost["trail"]) > BLACK_HOLE_GHOST_TRAIL_LENGTH:
+                ghost["trail"].pop(0)
+
+            for target in huntable_planets[:]:
+                dx = ghost["pos"][0] - target["pos"][0]
+                dy = ghost["pos"][1] - target["pos"][1]
+                sum_r = BLACK_HOLE_GHOST_RADIUS + target["radius"]
+                if dx * dx + dy * dy < sum_r * sum_r:
+                    planet_debris_particles.extend(spawn_planet_debris(target, ghost["vel"]))
+                    for moon_data in get_moon_positions(target):
+                        planet_debris_particles.extend(spawn_moon_debris(moon_data["pos"]))
+                    target["moon_slots"] = []
+                    sync_moon_count(target)
+                    target["active"] = False
+                    ghost_capture_sound.play()
+                    huntable_planets.remove(target)
+                    break
 
     # Update phase: move, bounce, sun collision
     for body in bodies:
@@ -1095,6 +1215,31 @@ while running:
     )
     if not black_hole_active:
         draw_sun_face(screen, is_angry=flare_near_sun)
+
+    # Draw black hole ghosts.
+    if black_hole_active:
+        ghost_overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        for ghost in black_hole_ghosts:
+            gx, gy = int(ghost["pos"][0]), int(ghost["pos"][1])
+            phase_ratio = (math.sin(ghost["phase"] * 1.7) + 1.0) / 2.0
+            ghost_alpha = int(BLACK_HOLE_GHOST_ALPHA_MIN + (BLACK_HOLE_GHOST_ALPHA_MAX - BLACK_HOLE_GHOST_ALPHA_MIN) * phase_ratio)
+
+            for index, trail_pos in enumerate(ghost["trail"]):
+                trail_ratio = (index + 1) / max(1, len(ghost["trail"]))
+                trail_alpha = int(ghost_alpha * trail_ratio * 0.35)
+                trail_radius = max(4, int(BLACK_HOLE_GHOST_RADIUS * (0.45 + 0.35 * trail_ratio)))
+                tx, ty = int(trail_pos[0]), int(trail_pos[1])
+                pygame.draw.circle(ghost_overlay, (*GHOST_COLOR, trail_alpha), (tx, ty), trail_radius)
+
+            body_rect = pygame.Rect(gx - BLACK_HOLE_GHOST_RADIUS, gy - BLACK_HOLE_GHOST_RADIUS, BLACK_HOLE_GHOST_RADIUS * 2, BLACK_HOLE_GHOST_RADIUS * 2)
+            pygame.draw.ellipse(ghost_overlay, (*GHOST_COLOR, ghost_alpha), body_rect)
+            skirt_y = gy + BLACK_HOLE_GHOST_RADIUS // 2
+            for offset in (-10, 0, 10):
+                pygame.draw.circle(ghost_overlay, (*GHOST_COLOR, ghost_alpha), (gx + offset, skirt_y), 6)
+            eye_alpha = min(255, ghost_alpha + 25)
+            pygame.draw.circle(ghost_overlay, (*GHOST_EYE_COLOR, eye_alpha), (gx - 5, gy - 2), 2)
+            pygame.draw.circle(ghost_overlay, (*GHOST_EYE_COLOR, eye_alpha), (gx + 5, gy - 2), 2)
+        screen.blit(ghost_overlay, (0, 0))
 
     # Draw collapse shockwave ring.
     if collapse_shockwave is not None:
