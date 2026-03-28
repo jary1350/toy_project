@@ -18,6 +18,10 @@ SUN_COLOR = (255, 200, 80)
 GLOW_COLOR = (255, 230, 150, 80)  # Semi-transparent glow
 SUN_IMPACT_COLOR = (255, 135, 25)
 SUN_IMPACT_GLOW_COLOR = (255, 175, 70, 110)
+SUN_BLUE_GIANT_COLOR = (145, 214, 255)
+SUN_BLUE_GIANT_GLOW_COLOR = (180, 235, 255, 125)
+SUN_WHITE_DWARF_COLOR = (240, 248, 255)
+SUN_WHITE_DWARF_GLOW_COLOR = (215, 235, 255, 130)
 SATURN_COLOR = (180, 140, 60)  # Yellowish-brown
 RING_COLOR = (220, 200, 180)  # Saturn rings
 URANUS_RING_COLOR = (180, 220, 255)  # Uranus rings
@@ -31,7 +35,8 @@ CYAN = (0, 255, 255)  # Uranus body
 GRAY = (169, 169, 169)  # Mercury
 
 # Sun properties
-SUN_RADIUS = WIDTH // 15
+SUN_BASE_RADIUS = WIDTH // 15
+SUN_RADIUS = SUN_BASE_RADIUS
 SUN_POS = (WIDTH // 2, HEIGHT // 2)
 
 # Earth control settings
@@ -77,6 +82,14 @@ SUN_IMPACT_FLARE_MULTIPLIER = 3.8
 SUN_IMPACT_BOOST_SECONDS = 5
 GAME_FPS = 60
 SUN_IMPACT_BOOST_FRAMES = SUN_IMPACT_BOOST_SECONDS * GAME_FPS
+SUN_LIFECYCLE_SECONDS = 85
+SUN_AGE_MAX_FRAMES = SUN_LIFECYCLE_SECONDS * GAME_FPS
+SUN_BLUE_GIANT_START_RATIO = 0.55
+SUN_BLUE_GIANT_RADIUS_MULT = 1.85
+SUN_WHITE_DWARF_RADIUS_MULT = 0.58
+SUN_COLLAPSE_FLARE_COUNT = 150
+SUN_COLLAPSE_FLARE_SPEED_MIN = 6.5
+SUN_COLLAPSE_FLARE_SPEED_MAX = 12.0
 
 # Sun impact splash properties
 IMPACT_SPLASH_MIN = 44
@@ -91,6 +104,14 @@ IMPACT_DEBRIS_SPEED_MIN = 2.5
 IMPACT_DEBRIS_SPEED_MAX = 7.5
 IMPACT_DEBRIS_LIFETIME_MIN = 30
 IMPACT_DEBRIS_LIFETIME_MAX = 64
+
+# Planet debris properties (when flares destroy planets)
+PLANET_DEBRIS_COUNT_MIN = 26
+PLANET_DEBRIS_COUNT_MAX = 52
+PLANET_DEBRIS_SPEED_MIN = 2.0
+PLANET_DEBRIS_SPEED_MAX = 7.5
+PLANET_DEBRIS_LIFETIME_MIN = 26
+PLANET_DEBRIS_LIFETIME_MAX = 58
 
 # Game level
 LEVEL = 1
@@ -157,6 +178,22 @@ def spawn_flare():
         "lifetime": 300  # Frames until flare expires
     }
     return flare
+
+
+def spawn_massive_collapse_wave():
+    """Spawn a large radial shock of flares during sun collapse."""
+    wave = []
+    for i in range(SUN_COLLAPSE_FLARE_COUNT):
+        angle = (2 * math.pi * i) / SUN_COLLAPSE_FLARE_COUNT + random.uniform(-0.03, 0.03)
+        speed = random.uniform(SUN_COLLAPSE_FLARE_SPEED_MIN, SUN_COLLAPSE_FLARE_SPEED_MAX)
+        wave.append({
+            "pos": [SUN_POS[0] + math.cos(angle) * max(3, SUN_RADIUS // 3), SUN_POS[1] + math.sin(angle) * max(3, SUN_RADIUS // 3)],
+            "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+            "radius": random.randint(4, 8),
+            "color": (200, 235, 255),
+            "lifetime": random.randint(180, 320),
+        })
+    return wave
 
 
 def create_beep_sound(frequency, duration_ms, sample_rate=22050):
@@ -226,6 +263,34 @@ def spawn_sun_impact_splash(impact_pos, normal_vec):
     return splashes
 
 
+def spawn_planet_debris(body, incoming_velocity):
+    """Break a planet into debris chunks when a solar flare hits it."""
+    debris = []
+    base_angle = math.atan2(incoming_velocity[1], incoming_velocity[0]) if incoming_velocity else random.uniform(0, 2 * math.pi)
+    chunk_count = random.randint(PLANET_DEBRIS_COUNT_MIN, PLANET_DEBRIS_COUNT_MAX)
+    base_color = body.get("color", (200, 200, 200))
+
+    for _ in range(chunk_count):
+        angle = base_angle + random.uniform(-2.2, 2.2)
+        speed = random.uniform(PLANET_DEBRIS_SPEED_MIN, PLANET_DEBRIS_SPEED_MAX)
+        life = random.randint(PLANET_DEBRIS_LIFETIME_MIN, PLANET_DEBRIS_LIFETIME_MAX)
+        debris.append({
+            "pos": [body["pos"][0], body["pos"][1]],
+            "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+            "radius": random.randint(1, max(2, body["radius"] // 3)),
+            "lifetime": life,
+            "max_life": life,
+            "drag": random.uniform(0.91, 0.96),
+            "color": (
+                min(255, int(base_color[0] * random.uniform(0.8, 1.2))),
+                min(255, int(base_color[1] * random.uniform(0.8, 1.15))),
+                min(255, int(base_color[2] * random.uniform(0.8, 1.25))),
+            ),
+        })
+
+    return debris
+
+
 # Create sound effects
 flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
@@ -234,6 +299,11 @@ sun_impact_explosion_sound = create_sharp_explosion_sound()
 # Sun impact splashes list
 sun_impact_splashes = []
 sun_impact_boost_timer = 0
+planet_debris_particles = []
+
+# Sun lifecycle state
+sun_age_frames = 0
+sun_collapsed = False
 
 
 def draw_planet_face(surface, body):
@@ -432,7 +502,11 @@ while running:
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
                     sun_impact_splashes.clear()
+                    planet_debris_particles.clear()
                     sun_impact_boost_timer = 0
+                    sun_age_frames = 0
+                    sun_collapsed = False
+                    SUN_RADIUS = SUN_BASE_RADIUS
                 elif game_over:
                     # Restart from level 1
                     LEVEL = 1
@@ -447,7 +521,11 @@ while running:
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
                     sun_impact_splashes.clear()
+                    planet_debris_particles.clear()
                     sun_impact_boost_timer = 0
+                    sun_age_frames = 0
+                    sun_collapsed = False
+                    SUN_RADIUS = SUN_BASE_RADIUS
 
     screen.fill(BLACK)
 
@@ -455,6 +533,23 @@ while running:
 
     if sun_impact_boost_timer > 0:
         sun_impact_boost_timer -= 1
+
+    if not level_passed and not game_over:
+        sun_age_frames += 1
+        blue_giant_start = int(SUN_AGE_MAX_FRAMES * SUN_BLUE_GIANT_START_RATIO)
+        if not sun_collapsed:
+            if sun_age_frames >= SUN_AGE_MAX_FRAMES:
+                sun_collapsed = True
+                SUN_RADIUS = max(16, int(SUN_BASE_RADIUS * SUN_WHITE_DWARF_RADIUS_MULT))
+                flares.extend(spawn_massive_collapse_wave())
+                sun_impact_explosion_sound.play()
+            elif sun_age_frames >= blue_giant_start:
+                # Grow from baseline to giant size before collapse.
+                giant_progress = (sun_age_frames - blue_giant_start) / max(1, SUN_AGE_MAX_FRAMES - blue_giant_start)
+                giant_progress = max(0.0, min(1.0, giant_progress))
+                SUN_RADIUS = int(SUN_BASE_RADIUS * (1.0 + (SUN_BLUE_GIANT_RADIUS_MULT - 1.0) * giant_progress))
+            else:
+                SUN_RADIUS = SUN_BASE_RADIUS
 
     # Spawn flares randomly with level-based frequency
     if not level_passed and not game_over:
@@ -592,6 +687,17 @@ while running:
         if particle["lifetime"] <= 0:
             sun_impact_splashes.remove(particle)
 
+    # Update flare-created planet debris particles
+    for piece in planet_debris_particles[:]:
+        piece["pos"][0] += piece["vel"][0]
+        piece["pos"][1] += piece["vel"][1]
+        piece["vel"][0] *= piece["drag"]
+        piece["vel"][1] *= piece["drag"]
+        piece["lifetime"] -= 1
+
+        if piece["lifetime"] <= 0:
+            planet_debris_particles.remove(piece)
+
     # Flare collisions with bodies
     for flare in flares[:]:
         for body in bodies[:]:
@@ -602,6 +708,8 @@ while running:
             dist_sq = dx * dx + dy * dy
             sum_r = flare["radius"] + body["radius"]
             if dist_sq < sum_r * sum_r:
+                if body["name"] != "Asteroid":
+                    planet_debris_particles.extend(spawn_planet_debris(body, flare["vel"]))
                 body["active"] = False
                 flare_hit_sound.play()
                 if flare in flares:
@@ -649,8 +757,19 @@ while running:
 
     # Draw Sun with glow
     sun_is_orange = sun_impact_boost_timer > 0
-    sun_color = SUN_IMPACT_COLOR if sun_is_orange else SUN_COLOR
-    sun_glow = SUN_IMPACT_GLOW_COLOR if sun_is_orange else GLOW_COLOR
+    blue_giant_start = int(SUN_AGE_MAX_FRAMES * SUN_BLUE_GIANT_START_RATIO)
+    if sun_collapsed:
+        sun_color = SUN_WHITE_DWARF_COLOR
+        sun_glow = SUN_WHITE_DWARF_GLOW_COLOR
+    elif sun_age_frames >= blue_giant_start:
+        sun_color = SUN_BLUE_GIANT_COLOR
+        sun_glow = SUN_BLUE_GIANT_GLOW_COLOR
+    else:
+        sun_color = SUN_COLOR
+        sun_glow = GLOW_COLOR
+    if sun_is_orange and not sun_collapsed:
+        sun_color = SUN_IMPACT_COLOR
+        sun_glow = SUN_IMPACT_GLOW_COLOR
     pygame.draw.circle(screen, sun_color, SUN_POS, SUN_RADIUS)
     pygame.draw.circle(screen, sun_glow, SUN_POS, SUN_RADIUS + 15, 15)
     flare_near_sun = any(math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS for f in flares)
@@ -699,9 +818,31 @@ while running:
         if particle.get("kind") == "plasma" and life_ratio > 0.2:
             pygame.draw.circle(screen, (255, min(255, color[1] + 35), min(255, color[2] + 20)), (x, y), r + 2, 1)
 
+    # Draw planet debris created by flare impacts
+    for piece in planet_debris_particles:
+        life_ratio = piece["lifetime"] / max(1, piece["max_life"])
+        x, y = int(piece["pos"][0]), int(piece["pos"][1])
+        r = max(1, int(piece["radius"] * (0.55 + life_ratio)))
+        c = piece["color"]
+        color = (
+            min(255, int(c[0] * (0.5 + life_ratio))),
+            min(255, int(c[1] * (0.5 + life_ratio))),
+            min(255, int(c[2] * (0.5 + life_ratio))),
+        )
+        pygame.draw.circle(screen, color, (x, y), r)
+
     # Display level
     level_text = font.render(f"Level: {LEVEL}", True, (255, 255, 255))
     screen.blit(level_text, (10, 10))
+
+    # Sun aging countdown and phase display
+    if not sun_collapsed:
+        seconds_left = max(0, math.ceil((SUN_AGE_MAX_FRAMES - sun_age_frames) / GAME_FPS))
+        countdown_text = font.render(f"Sun Collapse in: {seconds_left}s", True, (180, 220, 255))
+        screen.blit(countdown_text, (10, 45))
+    else:
+        dwarf_text = font.render("Sun collapsed: White Dwarf state", True, (210, 235, 255))
+        screen.blit(dwarf_text, (10, 45))
 
     # Draw level passed or game over message
     if level_passed:
