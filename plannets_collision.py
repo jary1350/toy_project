@@ -253,12 +253,16 @@ def create_body(name, radius, color, is_asteroid=False):
             SUN_POS[1] + distance * math.sin(angle)
         )
     else:
-        # Avoid spawning too close to sun
-        while True:
-            pos = (random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50))
-            dist = math.hypot(pos[0] - SUN_POS[0], pos[1] - SUN_POS[1])
-            if dist > SUN_RADIUS + radius + 20:
-                break
+        # Special positioning for Earth: upper middle section
+        if name == "Earth":
+            pos = (WIDTH // 2 + random.randint(-80, 80), random.randint(200, 350))
+        else:
+            # Avoid spawning too close to sun
+            while True:
+                pos = (random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50))
+                dist = math.hypot(pos[0] - SUN_POS[0], pos[1] - SUN_POS[1])
+                if dist > SUN_RADIUS + radius + 20:
+                    break
 
     vel = (random.uniform(-2, 2), random.uniform(-2, 2))
     body = {"name": name, "pos": list(pos), "vel": list(vel), "radius": radius, "color": color, "active": True}
@@ -598,69 +602,124 @@ def draw_planet_face(surface, body):
 
 
 def draw_earth_realistic(surface, body):
-    """Draw Earth with realistic continents and oceans."""
+    """Draw Earth with realistic continents, oceans, islands, and atmosphere."""
     x, y = int(body["pos"][0]), int(body["pos"][1])
     r = body["radius"]
     
     if r < 8:
         return
     
-    # Ocean base (deep blue)
-    pygame.draw.circle(surface, (25, 80, 180), (x, y), r)
+    # Ocean base - gradient effect with deeper blues at poles
+    pygame.draw.circle(surface, (20, 85, 190), (x, y), r)  # Main ocean
+    
+    # Add ocean shading (slightly lighter at equator)
+    if r > 12:
+        pygame.draw.circle(surface, (30, 95, 200), (x, y), int(r * 0.95), 1)
     
     # Create a seeded random for consistent continent placement
     random.seed(42)  # Fixed seed for consistent Earth appearance
     
     # Define continent regions as (center_offset_x, center_offset_y, size_factor, color)
-    # Sizes are relative to planet radius
+    # Major continents
     continents = [
-        # North America
-        (-0.35, -0.25, 0.5, (34, 139, 34)),  # Forest green
+        # North America - forest green
+        (-0.35, -0.25, 0.5, (40, 145, 40)),
         # South America
-        (-0.25, 0.3, 0.35, (34, 139, 34)),
-        # Eurasia/Europe
-        (0.15, -0.3, 0.6, (34, 120, 34)),   # Slightly darker green
-        # Africa
-        (0.2, 0.1, 0.45, (107, 142, 35)),   # Olive green
-        # Australia
-        (0.4, 0.25, 0.25, (34, 139, 34)),
-        # Antarctica
-        (0, 0.6, 0.4, (169, 169, 169)),     # Gray (ice)
-        # Greenland
-        (-0.15, -0.5, 0.2, (192, 192, 192)), # Light gray
+        (-0.25, 0.3, 0.35, (45, 150, 35)),
+        # Eurasia - darker green for highlands
+        (0.15, -0.3, 0.6, (38, 125, 35)),
+        # Africa - transition to olive
+        (0.2, 0.1, 0.45, (110, 145, 40)),
+        # Australia - lighter tan-green
+        (0.4, 0.25, 0.25, (90, 140, 50)),
+        # Antarctica - icy white-gray
+        (0, 0.6, 0.4, (180, 185, 190)),
+        # Greenland - light arctic
+        (-0.15, -0.5, 0.2, (200, 210, 220)),
     ]
     
-    # Draw continents with slight variation
+    # Draw major continents with variation
     for cont_x, cont_y, size, color in continents:
-        # Add small random offset for natural look
         offset_x = cont_x + random.uniform(-0.08, 0.08)
         offset_y = cont_y + random.uniform(-0.08, 0.08)
         
-        # Calculate continent center position
         cent_x = int(x + offset_x * r)
         cent_y = int(y + offset_y * r)
-        cent_r = int(size * r * random.uniform(0.85, 1.15))
+        cent_r = int(size * r * random.uniform(0.88, 1.12))
         
-        # Draw continent as filled circle with some edge variation
+        # Draw continent
         pygame.draw.circle(surface, color, (cent_x, cent_y), cent_r)
         
-        # Add ocean color at edges for more realistic coastlines
+        # Add subtle coastline definition
         if cent_r > 4:
-            # Subtle glow effect at continent edges
-            pygame.draw.circle(surface, (20, 70, 160), (cent_x, cent_y), cent_r + 1, 1)
+            pygame.draw.circle(surface, (15, 65, 155), (cent_x, cent_y), cent_r + 1, 1)
     
-    # Add some cloud/atmospheric effect (white semi-transparent patches)
-    cloud_color = (220, 220, 240, 50)
-    num_clouds = random.randint(2, 4)
-    for _ in range(num_clouds):
-        cloud_x = int(x + random.uniform(-r * 0.8, r * 0.8))
-        cloud_y = int(y + random.uniform(-r * 0.8, r * 0.8))
-        cloud_r = int(r * random.uniform(0.15, 0.35))
+    # Add smaller islands and archipelagos for more realism
+    # Indonesia/Philippines region
+    island_regions = [
+        (0.35, 0.05, 0.08, (50, 140, 45)),   # Indonesia
+        (0.38, -0.08, 0.06, (55, 135, 50)),  # Philippines
+        (-0.15, 0.42, 0.07, (45, 135, 50)),  # Madagascar
+        (0.32, -0.22, 0.05, (60, 140, 45)),  # Japan
+        (-0.42, 0.15, 0.06, (50, 138, 48)),  # Caribbean
+        (0.05, -0.5, 0.04, (50, 140, 45)),   # Iceland region
+        (0.18, 0.35, 0.05, (55, 140, 50)),   # New Zealand
+    ]
+    
+    for island_x, island_y, size, color in island_regions:
+        offset_x = island_x + random.uniform(-0.05, 0.05)
+        offset_y = island_y + random.uniform(-0.05, 0.05)
         
-        # Check if cloud is within planet bounds
-        dist_from_center = math.hypot(cloud_x - x, cloud_y - y)
-        if dist_from_center + cloud_r <= r + 2:
-            pygame.draw.circle(surface, (200, 200, 220), (cloud_x, cloud_y), cloud_r // 2)
+        isle_x = int(x + offset_x * r)
+        isle_y = int(y + offset_y * r)
+        isle_r = int(size * r * random.uniform(0.9, 1.1))
+        
+        # Only draw if island is within planet bounds
+        dist = math.hypot(isle_x - x, isle_y - y)
+        if dist + isle_r <= r + 1:
+            pygame.draw.circle(surface, color, (isle_x, isle_y), isle_r)
+            if isle_r > 2:
+                pygame.draw.circle(surface, (12, 60, 150), (isle_x, isle_y), isle_r + 1, 1)
+    
+    # Atmospheric glow - subtle halo around the planet
+    if r > 10:
+        glow_surface = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surface, (100, 180, 255, 40), (r + 4, r + 4), r + 4)
+        surface.blit(glow_surface, (x - r - 4, y - r - 4))
+    
+    # Cloud systems - more realistic with varying density
+    def draw_cloud(cx, cy, cr, base_color):
+        # Main cloud mass
+        pygame.draw.circle(surface, base_color, (cx, cy), cr)
+        # Cloud edges fade out slightly
+        if cr > 3:
+            pygame.draw.circle(surface, (210, 215, 225), (cx, cy), int(cr * 0.7))
+    
+    # Trade wind cloud bands
+    num_bands = random.randint(2, 3)
+    for band in range(num_bands):
+        band_y = int(y + random.uniform(-r * 0.6, r * 0.6))
+        num_clouds_in_band = random.randint(3, 5)
+        for _ in range(num_clouds_in_band):
+            cloud_x = int(x + random.uniform(-r * 0.85, r * 0.85))
+            cloud_r = int(r * random.uniform(0.12, 0.28))
+            
+            dist_from_center = math.hypot(cloud_x - x, band_y - y)
+            if dist_from_center + cloud_r <= r:
+                draw_cloud(cloud_x, band_y, cloud_r, (215, 220, 235))
+    
+    # Polar ice caps with cloud coverage
+    if r > 12:
+        # Polar storms (small cloud systems at poles)
+        for pole_offset in [-1, 1]:
+            pole_y = int(y + pole_offset * r * 0.7)
+            num_polar_clouds = random.randint(2, 3)
+            for _ in range(num_polar_clouds):
+                pc_x = int(x + random.uniform(-r * 0.4, r * 0.4))
+                pc_r = int(r * random.uniform(0.1, 0.18))
+                dist = math.hypot(pc_x - x, pole_y - y)
+                if dist + pc_r <= r:
+                    draw_cloud(pc_x, pole_y, pc_r, (230, 235, 240))
     
     # Restore random seed
     random.seed()
