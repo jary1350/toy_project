@@ -47,17 +47,18 @@ PLANETS_DATA = [
     ("Neptune", 20, BLUE)
 ]
 
-# Planet mood map for facial expressions
-PLANET_MOODS = {
-    "Mercury": "worried",
-    "Venus": "happy",
-    "Earth": "happy",
-    "Mars": "sad",
-    "Jupiter": "sleepy",
-    "Saturn": "worried",
-    "Uranus": "sleepy",
-    "Neptune": "sad",
-}
+# Planet mood/behavior tuning
+DEFAULT_PLANET_MOOD = "neutral"
+THREAT_DETECTION_BASE = 120
+THREAT_DETECTION_PER_RADIUS = 4
+THREAT_DETECTION_LEVEL_BONUS = 18
+ESCAPE_CHANCE_BASE = 0.30
+ESCAPE_CHANCE_PER_LEVEL = 0.10
+ESCAPE_CHANCE_MAX = 0.98
+ESCAPE_ACCEL_BASE = 0.38
+ESCAPE_ACCEL_PER_LEVEL = 0.10
+ESCAPE_ACCEL_MAX = 1.60
+PLANET_MAX_SPEED = 4.0
 
 # Asteroid properties
 NUM_ASTEROIDS = 50
@@ -70,6 +71,14 @@ FLARE_RADIUS = 5
 FLARE_COLOR = (255, 100, 0)  # Orange fireball
 FLARE_SPAWN_CHANCE = 0.02  # 2% chance per frame
 FLARE_SPEED = 4
+
+# Sun impact splash properties
+IMPACT_SPLASH_MIN = 18
+IMPACT_SPLASH_MAX = 34
+IMPACT_SPLASH_SPEED_MIN = 3.5
+IMPACT_SPLASH_SPEED_MAX = 9.0
+IMPACT_SPLASH_LIFETIME_MIN = 14
+IMPACT_SPLASH_LIFETIME_MAX = 30
 
 # Game level
 LEVEL = 1
@@ -148,19 +157,60 @@ def create_beep_sound(frequency, duration_ms, sample_rate=22050):
     return sound
 
 
+def create_sharp_explosion_sound(duration_ms=140, sample_rate=22050):
+    """Create a short, bright burst for planet impacts on the sun."""
+    frames = int(duration_ms * sample_rate / 1000)
+    t = np.arange(frames, dtype=np.float32) / sample_rate
+    # Sharp attack with a quick decay and noisy edge so it feels explosive.
+    envelope = np.exp(-24.0 * t)
+    tone = np.sin(2.0 * np.pi * 1700.0 * t) + 0.6 * np.sin(2.0 * np.pi * 2400.0 * t)
+    noise = np.random.uniform(-1.0, 1.0, frames).astype(np.float32)
+    wave = (0.72 * tone + 0.28 * noise) * envelope
+    wave = np.clip(wave, -1.0, 1.0)
+    arr = (wave * 32767).astype(np.int16)
+    arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
+    return pygame.sndarray.make_sound(arr)
+
+
+def spawn_sun_impact_splash(impact_pos, normal_vec):
+    """Spawn bright flare fragments that splash outward from a sun impact."""
+    splashes = []
+    base_angle = math.atan2(normal_vec[1], normal_vec[0])
+    count = random.randint(IMPACT_SPLASH_MIN, IMPACT_SPLASH_MAX)
+
+    for _ in range(count):
+        spread = random.uniform(-1.05, 1.05)
+        angle = base_angle + spread
+        speed = random.uniform(IMPACT_SPLASH_SPEED_MIN, IMPACT_SPLASH_SPEED_MAX)
+        life = random.randint(IMPACT_SPLASH_LIFETIME_MIN, IMPACT_SPLASH_LIFETIME_MAX)
+        splashes.append({
+            "pos": [impact_pos[0], impact_pos[1]],
+            "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+            "radius": random.randint(2, 5),
+            "lifetime": life,
+            "max_life": life,
+        })
+
+    return splashes
+
+
 # Create sound effects
 flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
+sun_impact_explosion_sound = create_sharp_explosion_sound()
+
+# Sun impact splashes list
+sun_impact_splashes = []
 
 
 def draw_planet_face(surface, body):
-    """Draw a mood-based face for a planet (happy, sad, worried, sleepy)."""
+    """Draw a mood-based face for a planet (neutral, worried, happy, sleepy)."""
     x, y = int(body["pos"][0]), int(body["pos"][1])
     r = body["radius"]
     if r < 8:
         return
 
-    mood = PLANET_MOODS.get(body["name"], "happy")
+    mood = body.get("mood", DEFAULT_PLANET_MOOD)
     eye_ox = max(2, r // 3)
     eye_oy = max(2, r // 4)
     eye_r  = max(2, r // 5)
@@ -194,9 +244,6 @@ def draw_planet_face(surface, body):
 
     if mood == "happy":
         pygame.draw.arc(surface, mouth_color, mouth_rect, math.pi, 2 * math.pi, mouth_thickness)
-    elif mood == "sad":
-        sad_rect = pygame.Rect(x - mouth_w // 2, y + r // 4, mouth_w, mouth_h)
-        pygame.draw.arc(surface, mouth_color, sad_rect, 0, math.pi, mouth_thickness)
     elif mood == "worried":
         wav_y = y + r // 3
         pygame.draw.line(surface, mouth_color, (x - mouth_w // 2, wav_y), (x - mouth_w // 6, wav_y + 2), mouth_thickness)
@@ -204,6 +251,64 @@ def draw_planet_face(surface, body):
         pygame.draw.line(surface, mouth_color, (x + mouth_w // 6, wav_y - 2), (x + mouth_w // 2, wav_y), mouth_thickness)
     elif mood == "sleepy":
         pygame.draw.line(surface, mouth_color, (x - mouth_w // 3, y + r // 3), (x + mouth_w // 3, y + r // 3), mouth_thickness)
+    else:
+        # Neutral face: relaxed straight mouth.
+        pygame.draw.line(surface, mouth_color, (x - mouth_w // 3, y + r // 3), (x + mouth_w // 3, y + r // 3), mouth_thickness)
+
+
+def get_threat_vector(body, active_planets, flares, level):
+    """Return normalized vector away from nearest threat and whether a threat is nearby."""
+    detect_range = (
+        THREAT_DETECTION_BASE
+        + body["radius"] * THREAT_DETECTION_PER_RADIUS
+        + (level - 1) * THREAT_DETECTION_LEVEL_BONUS
+    )
+    nearest_dist = float("inf")
+    away_vec = None
+
+    for other in active_planets:
+        if other is body:
+            continue
+        if other["radius"] <= body["radius"]:
+            continue
+
+        dx = body["pos"][0] - other["pos"][0]
+        dy = body["pos"][1] - other["pos"][1]
+        dist = math.hypot(dx, dy)
+        if 0 < dist < detect_range and dist < nearest_dist:
+            nearest_dist = dist
+            away_vec = (dx / dist, dy / dist)
+
+    for flare in flares:
+        dx = body["pos"][0] - flare["pos"][0]
+        dy = body["pos"][1] - flare["pos"][1]
+        dist = math.hypot(dx, dy)
+        if 0 < dist < detect_range and dist < nearest_dist:
+            nearest_dist = dist
+            away_vec = (dx / dist, dy / dist)
+
+    return away_vec
+
+
+def is_threat_to_smaller_planet(body, active_planets, level):
+    """Return True if this planet is currently menacing any smaller nearby planet."""
+    detect_range = (
+        THREAT_DETECTION_BASE
+        + body["radius"] * THREAT_DETECTION_PER_RADIUS
+        + (level - 1) * THREAT_DETECTION_LEVEL_BONUS
+    )
+    for other in active_planets:
+        if other is body:
+            continue
+        if body["radius"] <= other["radius"]:
+            continue
+
+        dx = body["pos"][0] - other["pos"][0]
+        dy = body["pos"][1] - other["pos"][1]
+        dist = math.hypot(dx, dy)
+        if dist < detect_range:
+            return True
+    return False
 
 
 def draw_sun_face(surface, is_angry):
@@ -293,6 +398,7 @@ while running:
                     for _ in range(num_asteroids):
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
+                    sun_impact_splashes.clear()
                 elif game_over:
                     # Restart from level 1
                     LEVEL = 1
@@ -306,6 +412,7 @@ while running:
                     for _ in range(num_asteroids):
                         bodies.append(create_body("Asteroid", ASTEROID_RADIUS, ASTEROID_COLOR, is_asteroid=True))
                     flares.clear()
+                    sun_impact_splashes.clear()
 
     screen.fill(BLACK)
 
@@ -316,6 +423,35 @@ while running:
         spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
         if random.random() < spawn_chance:
             flares.append(spawn_flare())
+
+    # Planet face state + threat-response AI
+    active_planets = [b for b in bodies if b["active"] and b["name"] != "Asteroid"]
+    for body in active_planets:
+        mood = DEFAULT_PLANET_MOOD
+        away_vec = get_threat_vector(body, active_planets, flares, LEVEL)
+
+        if away_vec is not None:
+            mood = "worried"
+            if body["name"] != "Earth":
+                escape_chance = min(
+                    ESCAPE_CHANCE_MAX,
+                    ESCAPE_CHANCE_BASE + (LEVEL - 1) * ESCAPE_CHANCE_PER_LEVEL,
+                )
+                if random.random() < escape_chance:
+                    escape_accel = min(
+                        ESCAPE_ACCEL_MAX,
+                        ESCAPE_ACCEL_BASE + (LEVEL - 1) * ESCAPE_ACCEL_PER_LEVEL,
+                    )
+                    body["vel"][0] += away_vec[0] * escape_accel
+                    body["vel"][1] += away_vec[1] * escape_accel
+                    speed = math.hypot(body["vel"][0], body["vel"][1])
+                    if speed > PLANET_MAX_SPEED:
+                        body["vel"][0] = (body["vel"][0] / speed) * PLANET_MAX_SPEED
+                        body["vel"][1] = (body["vel"][1] / speed) * PLANET_MAX_SPEED
+        elif is_threat_to_smaller_planet(body, active_planets, LEVEL):
+            mood = "happy"
+
+        body["mood"] = mood
 
     # Update phase: move, bounce, sun collision
     for body in bodies:
@@ -366,6 +502,12 @@ while running:
         dist_sq = dx * dx + dy * dy
         sum_r = SUN_RADIUS + body["radius"]
         if dist_sq < sum_r * sum_r:
+            if body["name"] != "Asteroid":
+                dist = math.sqrt(max(dist_sq, 1e-6))
+                nx, ny = dx / dist, dy / dist
+                impact_pos = [SUN_POS[0] + nx * SUN_RADIUS, SUN_POS[1] + ny * SUN_RADIUS]
+                sun_impact_splashes.extend(spawn_sun_impact_splash(impact_pos, (nx, ny)))
+                sun_impact_explosion_sound.play()
             body["active"] = False
 
     # Wormhole teleportation
@@ -397,6 +539,17 @@ while running:
             flare["pos"][1] < -FLARE_RADIUS or flare["pos"][1] > HEIGHT + FLARE_RADIUS or
             flare["lifetime"] <= 0):
             flares.remove(flare)
+
+    # Update sun impact splash particles
+    for particle in sun_impact_splashes[:]:
+        particle["pos"][0] += particle["vel"][0]
+        particle["pos"][1] += particle["vel"][1]
+        particle["vel"][0] *= 0.95
+        particle["vel"][1] *= 0.95
+        particle["lifetime"] -= 1
+
+        if particle["lifetime"] <= 0:
+            sun_impact_splashes.remove(particle)
 
     # Flare collisions with bodies
     for flare in flares[:]:
@@ -485,6 +638,14 @@ while running:
         pygame.draw.circle(screen, flare["color"], (x, y), flare["radius"])
         # Add glow effect to flares
         pygame.draw.circle(screen, (255, 150, 50, 100), (x, y), flare["radius"] + 5, 2)
+
+    # Draw sun impact splash fragments
+    for particle in sun_impact_splashes:
+        life_ratio = particle["lifetime"] / max(1, particle["max_life"])
+        x, y = int(particle["pos"][0]), int(particle["pos"][1])
+        r = max(1, int(particle["radius"] * life_ratio + 1))
+        color = (255, int(120 + 120 * life_ratio), int(40 + 60 * life_ratio))
+        pygame.draw.circle(screen, color, (x, y), r)
 
     # Display level
     level_text = font.render(f"Level: {LEVEL}", True, (255, 255, 255))
