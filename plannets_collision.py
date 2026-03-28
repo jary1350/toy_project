@@ -82,7 +82,7 @@ SUN_IMPACT_FLARE_MULTIPLIER = 3.8
 SUN_IMPACT_BOOST_SECONDS = 5
 GAME_FPS = 60
 SUN_IMPACT_BOOST_FRAMES = SUN_IMPACT_BOOST_SECONDS * GAME_FPS
-SUN_LIFECYCLE_SECONDS = 85
+SUN_LIFECYCLE_SECONDS = 42
 SUN_AGE_MAX_FRAMES = SUN_LIFECYCLE_SECONDS * GAME_FPS
 SUN_BLUE_GIANT_START_RATIO = 0.55
 SUN_BLUE_GIANT_RADIUS_MULT = 1.85
@@ -90,6 +90,10 @@ SUN_WHITE_DWARF_RADIUS_MULT = 0.58
 SUN_COLLAPSE_FLARE_COUNT = 150
 SUN_COLLAPSE_FLARE_SPEED_MIN = 6.5
 SUN_COLLAPSE_FLARE_SPEED_MAX = 12.0
+COLLAPSE_SHAKE_FRAMES = 28
+COLLAPSE_SHAKE_INTENSITY = 20
+COLLAPSE_SHOCKWAVE_DURATION = 45
+COLLAPSE_SHOCKWAVE_SPEED = 24
 
 # Sun impact splash properties
 IMPACT_SPLASH_MIN = 44
@@ -221,6 +225,20 @@ def create_sharp_explosion_sound(duration_ms=140, sample_rate=22050):
     return pygame.sndarray.make_sound(arr)
 
 
+def create_flare_planet_impact_sound(duration_ms=130, sample_rate=22050):
+    """Create a crisp crackle burst for flare-to-planet impacts."""
+    frames = int(duration_ms * sample_rate / 1000)
+    t = np.arange(frames, dtype=np.float32) / sample_rate
+    envelope = np.exp(-18.0 * t)
+    tone = np.sin(2.0 * np.pi * 1150.0 * t) + 0.45 * np.sin(2.0 * np.pi * 1950.0 * t)
+    noise = np.random.uniform(-1.0, 1.0, frames).astype(np.float32)
+    wave = (0.6 * tone + 0.4 * noise) * envelope
+    wave = np.clip(wave, -1.0, 1.0)
+    arr = (wave * 32767).astype(np.int16)
+    arr = np.repeat(arr.reshape(frames, 1), 2, axis=1)
+    return pygame.sndarray.make_sound(arr)
+
+
 def spawn_sun_impact_splash(impact_pos, normal_vec):
     """Spawn violent plasma jets and heavier debris from a sun impact."""
     splashes = []
@@ -295,6 +313,7 @@ def spawn_planet_debris(body, incoming_velocity):
 flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
 sun_impact_explosion_sound = create_sharp_explosion_sound()
+flare_planet_impact_sound = create_flare_planet_impact_sound()
 
 # Sun impact splashes list
 sun_impact_splashes = []
@@ -304,6 +323,9 @@ planet_debris_particles = []
 # Sun lifecycle state
 sun_age_frames = 0
 sun_collapsed = False
+collapse_shockwave = None
+camera_shake_timer = 0
+camera_shake_intensity = 0
 
 
 def draw_planet_face(surface, body):
@@ -507,6 +529,9 @@ while running:
                     sun_age_frames = 0
                     sun_collapsed = False
                     SUN_RADIUS = SUN_BASE_RADIUS
+                    collapse_shockwave = None
+                    camera_shake_timer = 0
+                    camera_shake_intensity = 0
                 elif game_over:
                     # Restart from level 1
                     LEVEL = 1
@@ -526,6 +551,9 @@ while running:
                     sun_age_frames = 0
                     sun_collapsed = False
                     SUN_RADIUS = SUN_BASE_RADIUS
+                    collapse_shockwave = None
+                    camera_shake_timer = 0
+                    camera_shake_intensity = 0
 
     screen.fill(BLACK)
 
@@ -533,6 +561,15 @@ while running:
 
     if sun_impact_boost_timer > 0:
         sun_impact_boost_timer -= 1
+
+    if camera_shake_timer > 0:
+        camera_shake_timer -= 1
+
+    if collapse_shockwave is not None:
+        collapse_shockwave["radius"] += COLLAPSE_SHOCKWAVE_SPEED
+        collapse_shockwave["life"] -= 1
+        if collapse_shockwave["life"] <= 0:
+            collapse_shockwave = None
 
     if not level_passed and not game_over:
         sun_age_frames += 1
@@ -543,6 +580,13 @@ while running:
                 SUN_RADIUS = max(16, int(SUN_BASE_RADIUS * SUN_WHITE_DWARF_RADIUS_MULT))
                 flares.extend(spawn_massive_collapse_wave())
                 sun_impact_explosion_sound.play()
+                collapse_shockwave = {
+                    "radius": SUN_RADIUS + 8,
+                    "life": COLLAPSE_SHOCKWAVE_DURATION,
+                    "max_life": COLLAPSE_SHOCKWAVE_DURATION,
+                }
+                camera_shake_timer = COLLAPSE_SHAKE_FRAMES
+                camera_shake_intensity = COLLAPSE_SHAKE_INTENSITY
             elif sun_age_frames >= blue_giant_start:
                 # Grow from baseline to giant size before collapse.
                 giant_progress = (sun_age_frames - blue_giant_start) / max(1, SUN_AGE_MAX_FRAMES - blue_giant_start)
@@ -710,8 +754,10 @@ while running:
             if dist_sq < sum_r * sum_r:
                 if body["name"] != "Asteroid":
                     planet_debris_particles.extend(spawn_planet_debris(body, flare["vel"]))
+                    flare_planet_impact_sound.play()
+                else:
+                    flare_hit_sound.play()
                 body["active"] = False
-                flare_hit_sound.play()
                 if flare in flares:
                     flares.remove(flare)
                 break
@@ -774,6 +820,17 @@ while running:
     pygame.draw.circle(screen, sun_glow, SUN_POS, SUN_RADIUS + 15, 15)
     flare_near_sun = any(math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS for f in flares)
     draw_sun_face(screen, is_angry=flare_near_sun)
+
+    # Draw collapse shockwave ring.
+    if collapse_shockwave is not None:
+        life_ratio = collapse_shockwave["life"] / max(1, collapse_shockwave["max_life"])
+        ring_color = (
+            255,
+            min(255, max(0, int(210 * life_ratio + 30))),
+            min(255, max(0, int(255 * life_ratio + 20))),
+        )
+        ring_thickness = max(2, int(12 * life_ratio))
+        pygame.draw.circle(screen, ring_color, SUN_POS, int(collapse_shockwave["radius"]), ring_thickness)
 
     # Draw active bodies
     active_bodies = [b for b in bodies if b["active"]]  # Refresh after collisions
@@ -864,6 +921,16 @@ while running:
 
     # Prune inactive bodies
     bodies[:] = [b for b in bodies if b["active"]]
+
+    # Camera shake post-process for collapse event.
+    if camera_shake_timer > 0:
+        fade = camera_shake_timer / max(1, COLLAPSE_SHAKE_FRAMES)
+        amplitude = max(1, int(camera_shake_intensity * fade))
+        shake_x = random.randint(-amplitude, amplitude)
+        shake_y = random.randint(-amplitude, amplitude)
+        shaken_frame = screen.copy()
+        screen.fill(BLACK)
+        screen.blit(shaken_frame, (shake_x, shake_y))
 
     pygame.display.flip()
     clock.tick(GAME_FPS)
