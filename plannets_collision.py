@@ -22,6 +22,7 @@ SUN_BLUE_GIANT_COLOR = (145, 214, 255)
 SUN_BLUE_GIANT_GLOW_COLOR = (180, 235, 255, 125)
 SUN_WHITE_DWARF_COLOR = (240, 248, 255)
 SUN_WHITE_DWARF_GLOW_COLOR = (215, 235, 255, 130)
+SUN_BLACK_HOLE_GLOW_COLOR = (85, 115, 180, 110)
 SATURN_COLOR = (180, 140, 60)  # Yellowish-brown
 RING_COLOR = (220, 200, 180)  # Saturn rings
 URANUS_RING_COLOR = (180, 220, 255)  # Uranus rings
@@ -33,6 +34,8 @@ RED = (220, 20, 60)  # Mars
 ORANGE = (255, 140, 0)  # Venus
 CYAN = (0, 255, 255)  # Uranus body
 GRAY = (169, 169, 169)  # Mercury
+MOON_COLOR = (220, 225, 235)
+MOON_GLOW_COLOR = (180, 200, 230)
 
 # Sun properties
 SUN_BASE_RADIUS = WIDTH // 15
@@ -87,6 +90,9 @@ SUN_AGE_MAX_FRAMES = SUN_LIFECYCLE_SECONDS * GAME_FPS
 SUN_BLUE_GIANT_START_RATIO = 0.55
 SUN_BLUE_GIANT_RADIUS_MULT = 1.85
 SUN_WHITE_DWARF_RADIUS_MULT = 0.58
+WHITE_DWARF_SECONDS = 5
+WHITE_DWARF_MAX_FRAMES = WHITE_DWARF_SECONDS * GAME_FPS
+SUN_BLACK_HOLE_RADIUS_MULT = 0.34
 SUN_COLLAPSE_FLARE_COUNT = 150
 SUN_COLLAPSE_FLARE_SPEED_MIN = 6.5
 SUN_COLLAPSE_FLARE_SPEED_MAX = 12.0
@@ -94,6 +100,12 @@ COLLAPSE_SHAKE_FRAMES = 28
 COLLAPSE_SHAKE_INTENSITY = 20
 COLLAPSE_SHOCKWAVE_DURATION = 45
 COLLAPSE_SHOCKWAVE_SPEED = 24
+BLACK_FLARE_RADIUS = 7
+BLACK_FLARE_SPEED = 5.5
+BLACK_FLARE_SPAWN_CHANCE = 0.05
+BLACK_HOLE_PULL_ACCEL = 0.35
+BLACK_HOLE_PULL_SPEED_MIN = 4.5
+BLACK_HOLE_PULL_SPEED_MAX = 14.0
 
 # Sun impact splash properties
 IMPACT_SPLASH_MIN = 44
@@ -117,6 +129,21 @@ PLANET_DEBRIS_SPEED_MAX = 7.5
 PLANET_DEBRIS_LIFETIME_MIN = 26
 PLANET_DEBRIS_LIFETIME_MAX = 58
 
+# Moon shield properties
+MAX_MOONS = 3
+MOON_RADIUS = 5
+MOON_ORBIT_GAP = 16
+MOON_ORBIT_SPEED_MIN = 0.01
+MOON_ORBIT_SPEED_MAX = 0.02
+MOON_SLOT_ANGLES = (-math.pi / 2, math.pi / 6, 5 * math.pi / 6)
+MOON_DEBRIS_COUNT_MIN = 12
+MOON_DEBRIS_COUNT_MAX = 22
+MOON_DEBRIS_SPEED_MIN = 2.5
+MOON_DEBRIS_SPEED_MAX = 6.5
+MOON_DEBRIS_LIFETIME_MIN = 18
+MOON_DEBRIS_LIFETIME_MAX = 36
+ASTEROIDS_PER_MOON = 5
+
 # Game level
 LEVEL = 1
 FLARE_FREQUENCY_MULTIPLIER = 1.0
@@ -124,6 +151,87 @@ FLARE_FREQUENCY_MULTIPLIER = 1.0
 # Wormhole properties
 WORMHOLE_RADIUS = 45
 WORMHOLE_COOLDOWN_FRAMES = 60
+
+
+def get_initial_moon_count(name):
+    if name in ("Mercury", "Venus"):
+        return 0
+    if name in ("Earth", "Mars"):
+        return 1
+    if name in ("Jupiter", "Saturn", "Uranus", "Neptune"):
+        return 2
+    return 0
+
+
+def get_initial_moon_slots(name):
+    return list(range(get_initial_moon_count(name)))
+
+
+def sync_moon_count(body):
+    body["moons"] = len(body.get("moon_slots", []))
+
+
+def add_moon_to_body(body):
+    moon_slots = body.setdefault("moon_slots", [])
+    if len(moon_slots) >= MAX_MOONS:
+        sync_moon_count(body)
+        return False
+
+    for slot_id in range(MAX_MOONS):
+        if slot_id not in moon_slots:
+            moon_slots.append(slot_id)
+            moon_slots.sort()
+            sync_moon_count(body)
+            return True
+
+    sync_moon_count(body)
+    return False
+
+
+def remove_moon_from_body(body, slot_id):
+    moon_slots = body.get("moon_slots", [])
+    if slot_id in moon_slots:
+        moon_slots.remove(slot_id)
+        sync_moon_count(body)
+        return True
+    return False
+
+
+def handle_asteroid_eat(body):
+    if body.get("name") == "Asteroid":
+        return
+
+    if len(body.get("moon_slots", [])) >= MAX_MOONS:
+        body["asteroids_eaten_toward_moon"] = 0
+        return
+
+    progress = body.get("asteroids_eaten_toward_moon", 0) + 1
+    if progress >= ASTEROIDS_PER_MOON:
+        gained = add_moon_to_body(body)
+        progress = 0 if gained else progress
+    body["asteroids_eaten_toward_moon"] = progress
+
+
+def get_moon_positions(body):
+    moon_slots = body.get("moon_slots", [])
+    if not moon_slots:
+        return []
+
+    orbit_radius = body["radius"] + MOON_ORBIT_GAP
+    base_angle = body.get("moon_orbit_angle", 0.0)
+    positions = []
+
+    for slot_id in moon_slots:
+        angle = base_angle + MOON_SLOT_ANGLES[slot_id]
+        positions.append({
+            "slot_id": slot_id,
+            "pos": [
+                body["pos"][0] + math.cos(angle) * orbit_radius,
+                body["pos"][1] + math.sin(angle) * orbit_radius,
+            ],
+        })
+
+    return positions
 
 
 def create_body(name, radius, color, is_asteroid=False):
@@ -143,7 +251,14 @@ def create_body(name, radius, color, is_asteroid=False):
                 break
 
     vel = (random.uniform(-2, 2), random.uniform(-2, 2))
-    return {"name": name, "pos": list(pos), "vel": list(vel), "radius": radius, "color": color, "active": True}
+    body = {"name": name, "pos": list(pos), "vel": list(vel), "radius": radius, "color": color, "active": True}
+    if not is_asteroid:
+        body["moon_slots"] = get_initial_moon_slots(name)
+        body["asteroids_eaten_toward_moon"] = 0
+        body["moon_orbit_angle"] = random.uniform(0, 2 * math.pi)
+        body["moon_orbit_speed"] = random.uniform(MOON_ORBIT_SPEED_MIN, MOON_ORBIT_SPEED_MAX)
+        sync_moon_count(body)
+    return body
 
 
 # Create planets and asteroids
@@ -182,6 +297,20 @@ def spawn_flare():
         "lifetime": 300  # Frames until flare expires
     }
     return flare
+
+
+def spawn_black_flare():
+    """Spawn an invisible black flare from the black hole stage."""
+    angle = random.uniform(0, 2 * math.pi)
+    speed = random.uniform(BLACK_FLARE_SPEED * 0.85, BLACK_FLARE_SPEED * 1.15)
+    return {
+        "pos": list(SUN_POS),
+        "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+        "radius": BLACK_FLARE_RADIUS,
+        "color": BLACK,
+        "lifetime": 260,
+        "kind": "black",
+    }
 
 
 def spawn_massive_collapse_wave():
@@ -309,6 +438,29 @@ def spawn_planet_debris(body, incoming_velocity):
     return debris
 
 
+def spawn_moon_debris(explosion_pos):
+    debris = []
+    chunk_count = random.randint(MOON_DEBRIS_COUNT_MIN, MOON_DEBRIS_COUNT_MAX)
+    for _ in range(chunk_count):
+        angle = random.uniform(0, 2 * math.pi)
+        speed = random.uniform(MOON_DEBRIS_SPEED_MIN, MOON_DEBRIS_SPEED_MAX)
+        life = random.randint(MOON_DEBRIS_LIFETIME_MIN, MOON_DEBRIS_LIFETIME_MAX)
+        debris.append({
+            "pos": [explosion_pos[0], explosion_pos[1]],
+            "vel": [math.cos(angle) * speed, math.sin(angle) * speed],
+            "radius": random.randint(1, 3),
+            "lifetime": life,
+            "max_life": life,
+            "drag": random.uniform(0.90, 0.95),
+            "color": (
+                random.randint(200, 255),
+                random.randint(200, 240),
+                random.randint(210, 255),
+            ),
+        })
+    return debris
+
+
 # Create sound effects
 flare_hit_sound = create_beep_sound(800, 100)  # High pitch, short beep for flare
 swallow_sound = create_beep_sound(400, 150)    # Lower pitch, slightly longer for swallow
@@ -323,6 +475,8 @@ planet_debris_particles = []
 # Sun lifecycle state
 sun_age_frames = 0
 sun_collapsed = False
+white_dwarf_age_frames = 0
+black_hole_active = False
 collapse_shockwave = None
 camera_shake_timer = 0
 camera_shake_intensity = 0
@@ -528,6 +682,8 @@ while running:
                     sun_impact_boost_timer = 0
                     sun_age_frames = 0
                     sun_collapsed = False
+                    white_dwarf_age_frames = 0
+                    black_hole_active = False
                     SUN_RADIUS = SUN_BASE_RADIUS
                     collapse_shockwave = None
                     camera_shake_timer = 0
@@ -550,6 +706,8 @@ while running:
                     sun_impact_boost_timer = 0
                     sun_age_frames = 0
                     sun_collapsed = False
+                    white_dwarf_age_frames = 0
+                    black_hole_active = False
                     SUN_RADIUS = SUN_BASE_RADIUS
                     collapse_shockwave = None
                     camera_shake_timer = 0
@@ -572,11 +730,28 @@ while running:
             collapse_shockwave = None
 
     if not level_passed and not game_over:
-        sun_age_frames += 1
         blue_giant_start = int(SUN_AGE_MAX_FRAMES * SUN_BLUE_GIANT_START_RATIO)
-        if not sun_collapsed:
+        if black_hole_active:
+            SUN_RADIUS = max(10, int(SUN_BASE_RADIUS * SUN_BLACK_HOLE_RADIUS_MULT))
+        elif sun_collapsed:
+            white_dwarf_age_frames += 1
+            SUN_RADIUS = max(16, int(SUN_BASE_RADIUS * SUN_WHITE_DWARF_RADIUS_MULT))
+            if white_dwarf_age_frames >= WHITE_DWARF_MAX_FRAMES:
+                black_hole_active = True
+                SUN_RADIUS = max(10, int(SUN_BASE_RADIUS * SUN_BLACK_HOLE_RADIUS_MULT))
+                collapse_shockwave = {
+                    "radius": SUN_RADIUS + 6,
+                    "life": COLLAPSE_SHOCKWAVE_DURATION,
+                    "max_life": COLLAPSE_SHOCKWAVE_DURATION,
+                    "dark": True,
+                }
+                camera_shake_timer = COLLAPSE_SHAKE_FRAMES
+                camera_shake_intensity = COLLAPSE_SHAKE_INTENSITY
+        else:
+            sun_age_frames += 1
             if sun_age_frames >= SUN_AGE_MAX_FRAMES:
                 sun_collapsed = True
+                white_dwarf_age_frames = 0
                 SUN_RADIUS = max(16, int(SUN_BASE_RADIUS * SUN_WHITE_DWARF_RADIUS_MULT))
                 flares.extend(spawn_massive_collapse_wave())
                 sun_impact_explosion_sound.play()
@@ -597,15 +772,20 @@ while running:
 
     # Spawn flares randomly with level-based frequency
     if not level_passed and not game_over:
-        spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
-        if sun_impact_boost_timer > 0:
-            spawn_chance *= SUN_IMPACT_FLARE_MULTIPLIER
-        if random.random() < spawn_chance:
-            flares.append(spawn_flare())
+        if black_hole_active:
+            if random.random() < BLACK_FLARE_SPAWN_CHANCE:
+                flares.append(spawn_black_flare())
+        else:
+            spawn_chance = FLARE_SPAWN_CHANCE * FLARE_FREQUENCY_MULTIPLIER
+            if sun_impact_boost_timer > 0:
+                spawn_chance *= SUN_IMPACT_FLARE_MULTIPLIER
+            if random.random() < spawn_chance:
+                flares.append(spawn_flare())
 
     # Planet face state + threat-response AI
     active_planets = [b for b in bodies if b["active"] and b["name"] != "Asteroid"]
     for body in active_planets:
+        body["moon_orbit_angle"] = (body.get("moon_orbit_angle", 0.0) + body.get("moon_orbit_speed", MOON_ORBIT_SPEED_MIN)) % (2 * math.pi)
         mood = DEFAULT_PLANET_MOOD
         away_vec = get_threat_vector(body, active_planets, flares, LEVEL)
 
@@ -635,6 +815,33 @@ while running:
     # Update phase: move, bounce, sun collision
     for body in bodies:
         if not body["active"]:
+            continue
+
+        if body.get("black_hole_pull", False):
+            dx_to_sun = SUN_POS[0] - body["pos"][0]
+            dy_to_sun = SUN_POS[1] - body["pos"][1]
+            dist_to_sun = math.hypot(dx_to_sun, dy_to_sun)
+
+            if dist_to_sun <= SUN_RADIUS + body["radius"] + 8:
+                planet_debris_particles.extend(spawn_planet_debris(body, body["vel"]))
+                for moon_data in get_moon_positions(body):
+                    planet_debris_particles.extend(spawn_moon_debris(moon_data["pos"]))
+                body["moon_slots"] = []
+                sync_moon_count(body)
+                flare_planet_impact_sound.play()
+                body["active"] = False
+                continue
+
+            if dist_to_sun > 0:
+                pull_speed = min(
+                    BLACK_HOLE_PULL_SPEED_MAX,
+                    body.get("black_hole_pull_speed", BLACK_HOLE_PULL_SPEED_MIN) + BLACK_HOLE_PULL_ACCEL,
+                )
+                body["black_hole_pull_speed"] = pull_speed
+                body["vel"][0] = (dx_to_sun / dist_to_sun) * pull_speed
+                body["vel"][1] = (dy_to_sun / dist_to_sun) * pull_speed
+                body["pos"][0] += body["vel"][0]
+                body["pos"][1] += body["vel"][1]
             continue
 
         # Earth player controls (arrows or WASD)
@@ -747,17 +954,68 @@ while running:
         for body in bodies[:]:
             if not body["active"]:
                 continue
+            if body.get("black_hole_pull", False):
+                continue
+
+            flare_kind = flare.get("kind", "solar")
+
+            if flare_kind == "black":
+                if body["name"] == "Asteroid":
+                    continue
+
+                dx = flare["pos"][0] - body["pos"][0]
+                dy = flare["pos"][1] - body["pos"][1]
+                sum_r = flare["radius"] + body["radius"]
+                if dx * dx + dy * dy < sum_r * sum_r:
+                    body["black_hole_pull"] = True
+                    body["black_hole_pull_speed"] = BLACK_HOLE_PULL_SPEED_MIN
+                    if flare in flares:
+                        flares.remove(flare)
+                    break
+                continue
+
+            if body["name"] != "Asteroid" and body.get("moons", 0) > 0:
+                moon_positions = get_moon_positions(body)
+                moon_hit = None
+                for moon_data in moon_positions:
+                    moon_pos = moon_data["pos"]
+                    dx = flare["pos"][0] - moon_pos[0]
+                    dy = flare["pos"][1] - moon_pos[1]
+                    moon_sum_r = flare["radius"] + MOON_RADIUS
+                    if dx * dx + dy * dy < moon_sum_r * moon_sum_r:
+                        moon_hit = moon_data
+                        break
+
+                if moon_hit is not None:
+                    remove_moon_from_body(body, moon_hit["slot_id"])
+                    planet_debris_particles.extend(spawn_moon_debris(moon_hit["pos"]))
+                    flare_planet_impact_sound.play()
+                    if flare in flares:
+                        flares.remove(flare)
+                    break
+
             dx = flare["pos"][0] - body["pos"][0]
             dy = flare["pos"][1] - body["pos"][1]
             dist_sq = dx * dx + dy * dy
             sum_r = flare["radius"] + body["radius"]
             if dist_sq < sum_r * sum_r:
                 if body["name"] != "Asteroid":
-                    planet_debris_particles.extend(spawn_planet_debris(body, flare["vel"]))
-                    flare_planet_impact_sound.play()
+                    if body.get("moons", 0) > 0:
+                        moon_positions = get_moon_positions(body)
+                        impact_moon = min(
+                            moon_positions,
+                            key=lambda moon_data: (flare["pos"][0] - moon_data["pos"][0]) ** 2 + (flare["pos"][1] - moon_data["pos"][1]) ** 2,
+                        )
+                        remove_moon_from_body(body, impact_moon["slot_id"])
+                        planet_debris_particles.extend(spawn_moon_debris(impact_moon["pos"]))
+                        flare_planet_impact_sound.play()
+                    else:
+                        planet_debris_particles.extend(spawn_planet_debris(body, flare["vel"]))
+                        flare_planet_impact_sound.play()
+                        body["active"] = False
                 else:
                     flare_hit_sound.play()
-                body["active"] = False
+                    body["active"] = False
                 if flare in flares:
                     flares.remove(flare)
                 break
@@ -772,11 +1030,21 @@ while running:
                 if b1["radius"] > b2["radius"]:
                     # b1 eats b2: increase b1's radius by b2's radius
                     b1["radius"] += b2["radius"]
+                    if b1["name"] != "Asteroid":
+                        if b2["name"] == "Asteroid":
+                            handle_asteroid_eat(b1)
+                        else:
+                            add_moon_to_body(b1)
                     b2["active"] = False
                     swallow_sound.play()
                 elif b2["radius"] > b1["radius"]:
                     # b2 eats b1: increase b2's radius by b1's radius
                     b2["radius"] += b1["radius"]
+                    if b2["name"] != "Asteroid":
+                        if b1["name"] == "Asteroid":
+                            handle_asteroid_eat(b2)
+                        else:
+                            add_moon_to_body(b2)
                     b1["active"] = False
                     swallow_sound.play()
                 # Equal size: both survive
@@ -804,7 +1072,10 @@ while running:
     # Draw Sun with glow
     sun_is_orange = sun_impact_boost_timer > 0
     blue_giant_start = int(SUN_AGE_MAX_FRAMES * SUN_BLUE_GIANT_START_RATIO)
-    if sun_collapsed:
+    if black_hole_active:
+        sun_color = BLACK
+        sun_glow = SUN_BLACK_HOLE_GLOW_COLOR
+    elif sun_collapsed:
         sun_color = SUN_WHITE_DWARF_COLOR
         sun_glow = SUN_WHITE_DWARF_GLOW_COLOR
     elif sun_age_frames >= blue_giant_start:
@@ -813,22 +1084,33 @@ while running:
     else:
         sun_color = SUN_COLOR
         sun_glow = GLOW_COLOR
-    if sun_is_orange and not sun_collapsed:
+    if sun_is_orange and not sun_collapsed and not black_hole_active:
         sun_color = SUN_IMPACT_COLOR
         sun_glow = SUN_IMPACT_GLOW_COLOR
     pygame.draw.circle(screen, sun_color, SUN_POS, SUN_RADIUS)
     pygame.draw.circle(screen, sun_glow, SUN_POS, SUN_RADIUS + 15, 15)
-    flare_near_sun = any(math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS for f in flares)
-    draw_sun_face(screen, is_angry=flare_near_sun)
+    flare_near_sun = any(
+        f.get("kind", "solar") != "black" and math.hypot(f["pos"][0] - SUN_POS[0], f["pos"][1] - SUN_POS[1]) < SUN_RADIUS
+        for f in flares
+    )
+    if not black_hole_active:
+        draw_sun_face(screen, is_angry=flare_near_sun)
 
     # Draw collapse shockwave ring.
     if collapse_shockwave is not None:
         life_ratio = collapse_shockwave["life"] / max(1, collapse_shockwave["max_life"])
-        ring_color = (
-            255,
-            min(255, max(0, int(210 * life_ratio + 30))),
-            min(255, max(0, int(255 * life_ratio + 20))),
-        )
+        if collapse_shockwave.get("dark"):
+            ring_color = (
+                min(255, max(0, int(80 * life_ratio + 10))),
+                min(255, max(0, int(110 * life_ratio + 20))),
+                min(255, max(0, int(190 * life_ratio + 35))),
+            )
+        else:
+            ring_color = (
+                255,
+                min(255, max(0, int(210 * life_ratio + 30))),
+                min(255, max(0, int(255 * life_ratio + 20))),
+            )
         ring_thickness = max(2, int(12 * life_ratio))
         pygame.draw.circle(screen, ring_color, SUN_POS, int(collapse_shockwave["radius"]), ring_thickness)
 
@@ -850,10 +1132,17 @@ while running:
 
         # Mood face on planets (skip tiny asteroids)
         if body["name"] != "Asteroid":
+            for moon_data in get_moon_positions(body):
+                moon_pos = moon_data["pos"]
+                mx, my = int(moon_pos[0]), int(moon_pos[1])
+                pygame.draw.circle(screen, MOON_COLOR, (mx, my), MOON_RADIUS)
+                pygame.draw.circle(screen, MOON_GLOW_COLOR, (mx, my), MOON_RADIUS + 2, 1)
             draw_planet_face(screen, body)
 
     # Draw flares
     for flare in flares:
+        if flare.get("kind", "solar") == "black":
+            continue
         x, y = int(flare["pos"][0]), int(flare["pos"][1])
         pygame.draw.circle(screen, flare["color"], (x, y), flare["radius"])
         # Add glow effect to flares
@@ -893,13 +1182,17 @@ while running:
     screen.blit(level_text, (10, 10))
 
     # Sun aging countdown and phase display
-    if not sun_collapsed:
+    if black_hole_active:
+        black_hole_text = font.render("Final stage: Black Hole", True, (130, 170, 255))
+        screen.blit(black_hole_text, (10, 45))
+    elif sun_collapsed:
+        seconds_left = max(0, math.ceil((WHITE_DWARF_MAX_FRAMES - white_dwarf_age_frames) / GAME_FPS))
+        countdown_text = font.render(f"Black Hole in: {seconds_left}s", True, (210, 235, 255))
+        screen.blit(countdown_text, (10, 45))
+    else:
         seconds_left = max(0, math.ceil((SUN_AGE_MAX_FRAMES - sun_age_frames) / GAME_FPS))
         countdown_text = font.render(f"Sun Collapse in: {seconds_left}s", True, (180, 220, 255))
         screen.blit(countdown_text, (10, 45))
-    else:
-        dwarf_text = font.render("Sun collapsed: White Dwarf state", True, (210, 235, 255))
-        screen.blit(dwarf_text, (10, 45))
 
     # Draw level passed or game over message
     if level_passed:
