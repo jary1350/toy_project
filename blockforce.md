@@ -8,28 +8,34 @@ When you destroy an enenmy, a random of amount of coins will pop out from the en
 You could upgrade your main canon damage, missles fire rate, manget strenth(help you attract coins towards you so they become easiler to collect). It costs coins to upgrade.
 There are a few types of plane user can unlock and choose from. You will start with 'classic' as default choice and you can unlock other planes by collect parts that is randomly droped from enemies just like the coins. 
 The drop rate of the parts are roughly 30% per play based on stage and level.
-The classic plane is a red color plane that shoots fire ball out of the front tip main canon and missles from the wings.
+---------------------The planes-----------------------------------
+The classic plane is a blue color plane that shoots fire ball out of the front tip main canon and missles from the wings.
 The V-Force plane is a voilet color plane shoots out bullets in a V shape from its front tip and missles from the wings.
 The Octupus plane is a orange plane that shoots 8 mini missles without main canon.
+The Slooth plane is a grey plane that slow everything down by 25%, but its fire rate is also 25% down
+The Insane plane is purle plane that has 3x damage but rediculous low health (1/3 of normal)
 The difference between main canon and missles are that missles are self guided and have a lower fire rate than the canon.
+
 
 --------------defination of stages-----------------------------------
 stages 1: 
-Theme: Rocky hills
+Theme: Egypt pyramids and oil fields with sand tornadoes that cause damage planes(player and enenmy)
 enemies:
-boss:
+boss: robotic scorpin shootes lasers from its tail and fire ball from mouth
 background music:
 
 stage2:
-Thete
+Theme: Japan Ocean with volcanic islands that erupts lava at time that cause damage planes(player and enenmy)
+enemies
+Boss: the yamato carrier from 2nd world war, it has two circle on either side that shoot out 9 missles each. triangle cannons shoot out 3 bullets 
 
 
 
-Egypt pyramids and oil fields with sand dust background
-Japan Ocean with volcanic islands and cruiseships, 
+Egypt pyramids and oil fields with sand tornadoes that cause damage planes(player and enenmy)
+Japan Ocean with volcanic islands that erupts lava at time that cause damage planes(player and enenmy) and cruiseships, 
 Europe with Germany 2nd world war planes and nazi flags and effele tower, rome city
 China with greatwalls, polluted green air and tanks,
-Russian with iceland and Su27 type planes
+Russian with iceland and polar bears Su27 type planes
 New York City with skyscrapers and f22,
-Space with alien suacers
-back in time with flying dinasuaers
+Space with alien suacers and solar flares
+back in time with flying dinasuaers and meteroids
