@@ -2,7 +2,9 @@ We want to build a blockforce game in spirit of popular shooting game sky force 
 The game starts with a 2d maps display all stages that is available to be unlocked and a hanger/garage where user can select and upgrade planes.
 To unlock a new stage, you have beat previous stages and meet some medal counts threshold.
 Each stage also have easy, normal and hard level, featuring same enemiies but with higher health/damage/faster fire rate. 
-There are 3 types of medals you can earn, 1st is destroy all enimies, 2nd is not get hit, 3rd is collect all stars.
+At the end of stages, show message " congratulations, you have pass stage xyz(stage name)" how much coins and percentage of enemies been destoried and what types of medals earned.
+
+There are 3 types of medals you can earn, 1st is destroy 60% enimies, 2 is destroy all enemies, 3rd is collect all stars, 4th is pass without taking any damage
 Medals are one time awards per stage per level, as you can get max 3 medals from stage 1 easy and another 3 from stage 1 normal and 3 more from stage 1 hard.  
 When you destroy an enenmy, a random of amount of coins will pop out from the enemy debries and slowly drift down and out of screen, you can collect them before they disappear.
 You could upgrade your main canon damage, missles fire rate, manget strenth(help you attract coins towards you so they become easiler to collect). It costs coins to upgrade.
@@ -18,24 +20,22 @@ The difference between main canon and missles are that missles are self guided a
 
 
 --------------defination of stages-----------------------------------
-stages 1: 
-Theme: Egypt pyramids and oil fields with sand tornadoes that cause damage planes(player and enenmy)
-enemies:
+stages 1 name: mideast 
+Theme: Egypt pyramids and oil fields with sand tornadoes that cause damage player planes and enenmy planes
+enemies: tanks on sand dunes that shoots cannons, and brownish planes that shoots lasers
 boss: robotic scorpin shootes lasers from its tail and fire ball from mouth
-background music:
+background music: egyptian music
 
-stage2:
-Theme: Japan Ocean with volcanic islands that erupts lava at time that cause damage planes(player and enenmy)
-enemies
+
+stage 2: Japan
+Theme: Japan Ocean with volcanic islands that erupts lava at times that cause damage player and enenmy planes
+enemies: destroy ships that shoots canons and red white planes that try to crash into you
 Boss: the yamato carrier from 2nd world war, it has two circle on either side that shoot out 9 missles each. triangle cannons shoot out 3 bullets 
 
 
-
-Egypt pyramids and oil fields with sand tornadoes that cause damage planes(player and enenmy)
-Japan Ocean with volcanic islands that erupts lava at time that cause damage planes(player and enenmy) and cruiseships, 
-Europe with Germany 2nd world war planes and nazi flags and effele tower, rome city
-China with greatwalls, polluted green air and tanks,
-Russian with iceland and polar bears Su27 type planes
-New York City with skyscrapers and f22,
-Space with alien suacers and solar flares
-back in time with flying dinasuaers and meteroids
+stage 3: Europe with Germany 2nd world war planes and nazi flags and effele tower, rome city
+stage 4: China and north Korea with greatwalls, polluted green air and tanks,
+stage 5: Russian with iceland and polar bears Su27 type planes
+stage 6: New York City with skyscrapers and f22,
+stage 7: Space with alien suacers and solar flares
+stage 8: back in time with flying dinasuaers and meteroids
